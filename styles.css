@@ -1211,6 +1211,22 @@ html, body {
 }
 .ntf-create:hover { opacity: 0.88; }
 
+/* ─── Custom Marker Modal ───────────────────────────────────────── */
+#btn-add-marker.active {
+  background: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: white !important;
+  box-shadow: 0 0 0 3px rgba(224,123,84,0.35);
+}
+.custom-marker-panel { max-width: 420px; }
+.cm-coords {
+  font-size: 11px; color: var(--color-text-light);
+  background: var(--color-surface, #f5f5f5);
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  margin-bottom: 14px; font-family: monospace;
+}
+.cm-row { display: flex; gap: 10px; }
+
 /* ─── Toast ───────────────────────────────────────────────────── */
 #toast-container {
   position: fixed;

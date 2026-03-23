@@ -107,6 +107,8 @@ const State = {
     dailyMealBudget: 22,
   },
   importedPois: [],       // POIs imported from Google Maps
+  customMarkerMode: false, // true when user is dropping a custom pin
+  pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
 
 // ─── Persistence (localStorage) ────────────────────────────────
@@ -831,6 +833,14 @@ function initMap(lat, lng) {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
   }).addTo(State.map);
+
+  // Custom marker mode: click on map to drop a pin
+  State.map.on('click', e => {
+    if (!State.customMarkerMode) return;
+    State.pendingMarkerLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
+    disableCustomMarkerMode();
+    openCustomMarkerModal(e.latlng.lat, e.latlng.lng);
+  });
 }
 
 function makePOIIcon(poi, dayIndex) {
@@ -1877,6 +1887,160 @@ function findNearestDestination(lat, lng) {
   return nearest;
 }
 
+// ─── Custom Marker (drop-a-pin) ────────────────────────────────
+
+function enableCustomMarkerMode() {
+  if (!State.trip) { showToast('Load a trip first'); return; }
+  State.customMarkerMode = true;
+  const mapEl = document.getElementById('map');
+  if (mapEl) mapEl.style.cursor = 'crosshair';
+  document.getElementById('btn-add-marker')?.classList.add('active');
+  showToast('Click anywhere on the map to drop a pin', 3000);
+}
+
+function disableCustomMarkerMode() {
+  State.customMarkerMode = false;
+  const mapEl = document.getElementById('map');
+  if (mapEl) mapEl.style.cursor = '';
+  document.getElementById('btn-add-marker')?.classList.remove('active');
+}
+
+function openCustomMarkerModal(lat, lng) {
+  let modal = document.getElementById('custom-marker-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'custom-marker-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  // Build day options
+  const dayOpts = (State.trip?.days || []).map((d, i) =>
+    `<option value="${esc(d.date)}"${i === State.selectedDayIndex ? ' selected' : ''}>${esc(d.label)} (${formatShortDate(d.date)})</option>`
+  ).join('');
+
+  // Build category options
+  const catOpts = Object.entries(CATEGORIES).map(([k, v]) =>
+    `<option value="${k}">${v.icon} ${v.label}</option>`
+  ).join('');
+
+  modal.innerHTML = `
+    <div class="modal-panel custom-marker-panel">
+      <div class="modal-header">
+        <span class="modal-title">📍 Add Custom Place</span>
+        <button class="modal-close-btn" onclick="App.closeCustomMarkerModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="cm-coords">📌 ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+        <div class="settings-field">
+          <label class="settings-label">Name *</label>
+          <input id="cm-name" type="text" class="settings-input" placeholder="e.g. Hidden viewpoint" autocomplete="off">
+        </div>
+        <div class="cm-row">
+          <div class="settings-field" style="flex:1">
+            <label class="settings-label">Category</label>
+            <select id="cm-category" class="settings-input">${catOpts}</select>
+          </div>
+          <div class="settings-field" style="width:80px">
+            <label class="settings-label">Emoji</label>
+            <input id="cm-emoji" type="text" class="settings-input" placeholder="📍" maxlength="4" style="text-align:center;font-size:18px;">
+          </div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Notes</label>
+          <input id="cm-notes" type="text" class="settings-input" placeholder="Any notes…" autocomplete="off">
+        </div>
+        <div class="cm-row">
+          <div class="settings-field" style="flex:1">
+            <label class="settings-label">Cost</label>
+            <select id="cm-cost" class="settings-input">
+              <option value="free">Free</option>
+              <option value="€">€ (budget)</option>
+              <option value="€€" selected>€€ (moderate)</option>
+              <option value="€€€">€€€ (splurge)</option>
+            </select>
+          </div>
+          <div class="settings-field" style="flex:1">
+            <label class="settings-label">Add to day</label>
+            <select id="cm-day" class="settings-input">
+              <option value="">— Don't add yet —</option>
+              ${dayOpts}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel" onclick="App.closeCustomMarkerModal()">Cancel</button>
+        <button class="modal-btn modal-btn-save" onclick="App.saveCustomMarker(${lat}, ${lng})">Add Place</button>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('cm-name')?.focus(), 50);
+}
+
+function closeCustomMarkerModal() {
+  document.getElementById('custom-marker-modal')?.classList.add('hidden');
+  State.pendingMarkerLatLng = null;
+}
+
+function saveCustomMarker(lat, lng) {
+  const name = document.getElementById('cm-name')?.value.trim();
+  if (!name) { showToast('Please enter a name'); return; }
+
+  const category = document.getElementById('cm-category')?.value || 'monument';
+  const emoji    = document.getElementById('cm-emoji')?.value.trim() || null;
+  const notes    = document.getElementById('cm-notes')?.value.trim() || '';
+  const costLabel = document.getElementById('cm-cost')?.value || '€€';
+  const dayDate  = document.getElementById('cm-day')?.value || null;
+
+  const id = 'custom-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now();
+
+  // Find nearest destination for availableDays
+  const nearestAcc = findNearestAccommodation(lat, lng);
+  const availableDays = nearestAcc
+    ? nearestAcc.days
+    : (State.trip?.days.map(d => d.date) || []);
+
+  const poi = {
+    id,
+    name,
+    category,
+    source: 'custom',
+    lat, lng,
+    description: notes || `Custom marker added at ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+    rating: null,
+    ratingCount: 0,
+    cost: costLabel === 'free' ? 'free' : costLabel,
+    costAmount: 0,
+    costLabel,
+    duration: 1,
+    energyCost: 2,
+    kidsFriendly: 3,
+    openingHours: '',
+    gmapsUrl: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+    availableDays,
+    tags: ['custom'],
+    ...(emoji ? { emoji } : {}),
+  };
+
+  // Add to trip pois
+  State.trip.pois.push(poi);
+  // Persist with imported pois
+  State.importedPois.push(poi);
+  Storage.saveImported(State.trip.id);
+
+  // Optionally add to a day's plan
+  if (dayDate && State.plan[dayDate] !== undefined) {
+    State.plan[dayDate].push(id);
+    Storage.save();
+  }
+
+  closeCustomMarkerModal();
+  placeMarkers();
+  renderAll();
+  showToast(`"${name}" added to the map`);
+}
+
 function importPois() {
   const ta = document.getElementById('import-json');
   const preview = document.getElementById('import-preview');
@@ -2384,6 +2548,14 @@ function injectHeaderButtons() {
   // Find the reset button to insert before it
   const resetBtn = document.getElementById('btn-reset-plan');
 
+  // "Drop a pin" button — togglable
+  const btnPin = document.createElement('button');
+  btnPin.id = 'btn-add-marker';
+  btnPin.title = 'Drop a custom pin on the map';
+  btnPin.textContent = '📍';
+  btnPin.onclick = () => State.customMarkerMode ? disableCustomMarkerMode() : enableCustomMarkerMode();
+  btnPin.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;transition:all 0.15s;';
+
   const btnImport = document.createElement('button');
   btnImport.id = 'btn-import';
   btnImport.title = 'Import places from Google Maps';
@@ -2406,10 +2578,12 @@ function injectHeaderButtons() {
   btnSettings.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
 
   if (resetBtn) {
+    header.insertBefore(btnPin, resetBtn);
     header.insertBefore(btnImport, resetBtn);
     header.insertBefore(btnOverview, resetBtn);
     header.insertBefore(btnSettings, resetBtn);
   } else {
+    header.appendChild(btnPin);
     header.appendChild(btnImport);
     header.appendChild(btnOverview);
     header.appendChild(btnSettings);
@@ -2445,6 +2619,11 @@ window.App = {
   closeNewTripForm,
   ntfAddDestination,
   ntfSubmit,
+  enableCustomMarkerMode,
+  disableCustomMarkerMode,
+  openCustomMarkerModal,
+  closeCustomMarkerModal,
+  saveCustomMarker,
 };
 
 // ─── Initialization ────────────────────────────────────────────
