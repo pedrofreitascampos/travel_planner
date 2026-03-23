@@ -3246,13 +3246,22 @@ function importPois() {
     return;
   }
 
-  let imported = 0;
+  // Radius filter
+  const filterEnabled = document.getElementById('import-filter-radius')?.checked;
+  const maxKm = parseFloat(document.getElementById('import-radius')?.value) || 50;
+  let imported = 0, skipped = 0;
   places.forEach(pl => {
     const id = `imported-${slugify(pl.name)}-${Math.floor(pl.lat * 1000)}`;
     // Don't add duplicates
     if (State.trip.pois.find(p => p.id === id)) return;
 
     const nearestAcc = findNearestDestination(pl.lat, pl.lng);
+    // Skip if too far from any accommodation
+    if (filterEnabled && nearestAcc) {
+      const { lat: aLat, lng: aLng } = getAccCoords(nearestAcc);
+      const dist = haversineKm(pl.lat, pl.lng, aLat, aLng);
+      if (dist > maxKm) { skipped++; return; }
+    }
     const availableDays = nearestAcc ? nearestAcc.days : (State.trip.days.map(d => d.date));
 
     const poi = {
@@ -3296,7 +3305,8 @@ function importPois() {
   placeMarkers();
   renderDayPlanContent(State.selectedDayIndex);
   closeImportModal();
-  showToast(`Imported ${imported} place${imported !== 1 ? 's' : ''} (${format})`);
+  const skipMsg = skipped > 0 ? `, ${skipped} skipped (too far)` : '';
+  showToast(`Imported ${imported} place${imported !== 1 ? 's' : ''} (${format})${skipMsg}`);
 }
 
 function importBooking() {
@@ -3836,6 +3846,15 @@ function injectModals() {
           </div>
         </details>
         <textarea id="import-json" class="import-textarea" placeholder="Paste content here (JSON, KML, or CSV)…"></textarea>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--color-text-secondary);cursor:pointer;">
+            <input type="checkbox" id="import-filter-radius" checked>
+            Only within
+          </label>
+          <input type="number" id="import-radius" class="settings-input" min="1" max="500" step="5" value="50"
+            style="width:60px;padding:3px 6px;font-size:12px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">km of any accommodation</span>
+        </div>
         <div id="import-preview"></div>
       </div>
       <div class="modal-actions" style="flex-wrap:wrap;gap:6px;">
