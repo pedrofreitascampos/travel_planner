@@ -1430,7 +1430,10 @@ function renderDayPlanContent(dayIndex) {
         <!-- Nearby -->
         <div class="discover-group">
           <div class="discover-group-label">
-            📍 Nearby · ${State.settings.discoveryRadius}km
+            📍 Nearby ·
+            <input type="number" class="discover-radius-input" min="1" max="50" step="1"
+              value="${State.settings.discoveryRadius}"
+              onchange="App.setDiscoveryRadius(this.value)" title="Search radius in km"> km
             <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
           </div>
           <div class="nearby-discover-results"></div>
@@ -2199,6 +2202,11 @@ function addNewAccommodation(forDate) {
   }
   renderAll();
   openAccEditModal(id, true);
+}
+
+function setDiscoveryRadius(value) {
+  State.settings.discoveryRadius = Math.max(1, Math.min(50, parseFloat(value) || 5));
+  Storage.saveSettings();
 }
 
 function setTransportType(date, type) {
@@ -3808,6 +3816,7 @@ window.App = {
   pePreviewIcon,
   savePoiEdit,
   setDayAcc,
+  setDiscoveryRadius,
   addNewAccommodation,
   setDayRouteMode,
   setTransportType,
