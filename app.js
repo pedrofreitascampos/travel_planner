@@ -1146,18 +1146,19 @@ async function drawInterCityRoute(dayIndex) {
   State.lastInterCityResult = null;
 
   const day = getDay(dayIndex);
-  if (!day?.driving || !State.map) return;
+  if (!day || !State.map) return;
 
   // Departure: previous night's acc, or home if first day
   const prevDate = State.trip.days[dayIndex - 1]?.date;
   let depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
   // Arrival: tonight's acc, or home if same as departure (driving away to home)
   let arrAcc = getEffectiveAcc(day.date);
-  if (arrAcc && depAcc && arrAcc.id === depAcc.id) arrAcc = getHomeAcc();
+  if (arrAcc && depAcc && arrAcc.id === depAcc.id && day.driving) arrAcc = getHomeAcc();
   if (!depAcc && !arrAcc) return;
   // If only one is missing, try home
   if (!depAcc) depAcc = getHomeAcc();
   if (!arrAcc) arrAcc = getHomeAcc();
+  // Only draw if accommodations are different (different locations)
   if (!depAcc || !arrAcc || depAcc.id === arrAcc.id) return;
 
   const depC = getAccCoords(depAcc);
