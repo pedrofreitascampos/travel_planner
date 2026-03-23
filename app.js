@@ -1044,6 +1044,27 @@ function placeMarkers() {
     State.markers[poi.id] = marker;
   });
 
+  // Available-to-add POIs as semi-transparent markers (tied to Suggested toggle)
+  if (State.layers.showSuggested && currentDay) {
+    const available = getPoisAvailableToAdd(State.selectedDayIndex);
+    available.forEach(poi => {
+      if (State.markers[poi.id]) return; // already placed
+      if (!State.layers.categories[poi.category]) return;
+      const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
+      const icon = L.divIcon({
+        html: `<div style="width:26px;height:26px;border-radius:50%;background:${cat.color};border:2px solid rgba(255,255,255,0.7);box-shadow:0 1px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:13px;opacity:0.45;">${cat.icon}</div>`,
+        className: '',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+        popupAnchor: [0, -14],
+      });
+      const m = L.marker([poi.lat, poi.lng], { icon })
+        .addTo(State.map)
+        .bindPopup(buildPopupHTML(poi), { maxWidth: 230, minWidth: 175 });
+      State.markers[poi.id] = m;
+    });
+  }
+
   // Accommodation markers
   const shownDateArr = [...shownDates];
   const addedAccIds = new Set();
