@@ -3796,13 +3796,17 @@ function injectModals() {
 
 function buildSharePayload() {
   return {
-    version: 1,
+    version: 2,
     tripId: State.trip.id,
     plan: State.plan,
     accEdits: State.accEdits,
     dayAccAssignments: State.dayAccAssignments,
     dayTransport: State.dayTransport,
+    dayRouteMode: State.dayRouteMode,
+    dayLabels: State.dayLabels,
+    dayEmojis: State.dayEmojis,
     importedPois: State.importedPois,
+    userAccommodations: State.trip?.accommodations.filter(a => a.isUserCreated) || [],
   };
 }
 
@@ -3904,8 +3908,18 @@ function loadSharedPlan() {
     if (data.plan) State.plan = data.plan;
     if (data.dayAccAssignments) State.dayAccAssignments = data.dayAccAssignments;
     if (data.dayTransport) State.dayTransport = data.dayTransport;
+    if (data.dayRouteMode) State.dayRouteMode = data.dayRouteMode;
+    if (data.dayLabels) State.dayLabels = data.dayLabels;
+    if (data.dayEmojis) State.dayEmojis = data.dayEmojis;
     Storage.save();
     if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
+    // Restore user-created accommodations
+    if (data.userAccommodations?.length) {
+      data.userAccommodations.forEach(acc => {
+        if (!State.trip.accommodations.find(a => a.id === acc.id)) State.trip.accommodations.push(acc);
+      });
+      Storage.saveUserAccs(data.tripId);
+    }
     if (data.importedPois?.length) {
       State.importedPois = data.importedPois;
       data.importedPois.forEach(poi => {
