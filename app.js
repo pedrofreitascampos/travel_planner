@@ -1219,11 +1219,12 @@ async function drawInterCityRoute(dayIndex) {
 // ─── Effective Day Label ────────────────────────────────────────
 function getEffectiveDayLabel(day) {
   if (State.dayLabels?.[day.date]) return State.dayLabels[day.date];
+  // Use accommodation's location field (city name), not its name
   const acc = getEffectiveAcc(day.date);
   if (acc) {
     const edit = State.accEdits[acc.id] || {};
-    const loc = edit.name || acc.location || acc.name || '';
-    // Extract city name (first part before comma)
+    // Prefer .location (e.g. "Mértola, Portugal"), fall back to .name
+    const loc = acc.location || edit.name || acc.name || '';
     const city = loc.split(',')[0].replace(/^(Accommodation|Home)\s*[—–-]\s*/i, '').trim();
     if (city && city !== day.label) return city;
   }
@@ -2294,15 +2295,10 @@ function getEffectiveRouteMode(date) {
 
 function saveDayLabel(date, text) {
   const trimmed = text.trim();
-  const day = State.trip?.days.find(d => d.date === date);
-  if (!day) return;
-  if (trimmed && trimmed !== day.label) {
-    State.dayLabels[date] = trimmed;
-  } else {
-    delete State.dayLabels[date];
-  }
+  if (!trimmed) { delete State.dayLabels[date]; }
+  else { State.dayLabels[date] = trimmed; }
   Storage.save();
-  renderDayTabs(); // update tab label
+  renderDayTabs();
 }
 
 function setDayRouteMode(date, mode) {
