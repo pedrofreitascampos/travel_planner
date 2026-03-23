@@ -431,7 +431,12 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   const walkKm = (routeDistKm != null && State.layers.routeMode === 'foot') ? routeDistKm : 0;
 
   // ── Cost ──────────────────────────────────────────────────────
-  const poiEntryCost = pois.reduce((sum, p) => sum + (p.costAmount || p.cost || 0), 0) * partySize;
+  const poiEntryCost = pois.reduce((sum, p) => {
+    // costAmount is the canonical per-person value; fall back to p.cost only if it's numeric
+    const amt = parseFloat(p.costAmount);
+    const fallback = parseFloat(p.cost);
+    return sum + (isNaN(amt) ? (isNaN(fallback) ? 0 : fallback) : amt);
+  }, 0) * partySize;
   const mealsCost = dailyMealBudget * partySize;
   let fuelCost = 0;
   if (day.driving) {
@@ -2352,7 +2357,7 @@ function addDiscoveredResult(lat, lng, name, category, dayIndex, osmTags) {
     id, name, category, source: 'discovered', lat, lng,
     description: descParts.join(' · ') || 'Discovered via search/nearby',
     rating: t.stars ? Math.min(parseFloat(t.stars), 5) : null,
-    ratingCount: 0, cost: 'free', costAmount: 0, costLabel: '?',
+    ratingCount: 0, cost: 'free', costAmount: 0, costLabel: 'Free',
     duration: 1, energyCost: 2, kidsFriendly: 3,
     openingHours: t.opening_hours || '',
     gmapsUrl: `https://www.google.com/maps/search/${encodeURIComponent(name)}/@${lat},${lng},17z`,
@@ -2520,10 +2525,10 @@ function openPoiEditModal(poiId) {
             <label class="pe-cost-toggle">
               <input type="checkbox" id="pe-free"
                 ${!(poi.costAmount > 0) ? 'checked' : ''}
-                onchange="document.getElementById('pe-cost-wrap').style.display=this.checked?'none':''">
+                onchange="document.getElementById('pe-cost-wrap').style.display=this.checked?'none':'flex'">
               Free entry
             </label>
-            <div id="pe-cost-wrap" style="display:${poi.costAmount > 0 ? 'flex' : 'none'};align-items:center;gap:6px;flex:1">
+            <div id="pe-cost-wrap" style="display:${poi.costAmount > 0 ? 'flex' : 'none'};align-items:center;gap:6px;margin-top:6px;flex:1">
               <span style="font-size:13px;color:var(--color-text-secondary)">€</span>
               <input id="pe-cost" type="number" class="settings-input" min="0" step="0.5"
                 value="${poi.costAmount > 0 ? poi.costAmount : ''}" placeholder="0" style="flex:1">
