@@ -539,7 +539,6 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   }
 
   // ── Gastronomic ───────────────────────────────────────────────
-  const foodPois = pois.filter(p => p.category === 'food' || p.category === 'bar');
   let gastronomic = 0;
   if (foodPois.length > 0) {
     gastronomic += 2;
