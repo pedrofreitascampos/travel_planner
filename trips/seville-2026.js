@@ -14,12 +14,12 @@ window.registerTrip({
   accommodations: [
     {
       id: 'acc-lisbon',
-      name: 'Home — Lisbon',
+      name: 'Home — Lisbon Airport',
       location: 'Lisbon, Portugal',
-      lat: 38.7169,
-      lng: -9.1399,
+      lat: 38.7756,
+      lng: -9.1354,
       days: [],
-      notes: 'Trip origin & return',
+      notes: 'Lisbon Humberto Delgado Airport (LIS)',
       isHome: true
     },
     {
