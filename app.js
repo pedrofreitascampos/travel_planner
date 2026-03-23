@@ -652,6 +652,10 @@ function calcTripMetrics() {
   const allMetrics = State.trip.days.map((_, i) => calcDayMetrics(i, null));
 
   const totalCost = allMetrics.reduce((s, m) => s + (m ? m.cost.total : 0), 0);
+  const totalEntries = allMetrics.reduce((s, m) => s + (m ? m.cost.poi : 0), 0);
+  const totalMeals = allMetrics.reduce((s, m) => s + (m ? m.cost.meals : 0), 0);
+  const totalTransport = allMetrics.reduce((s, m) => s + (m ? m.cost.transport : 0), 0);
+  const totalAcc = allMetrics.reduce((s, m) => s + (m ? m.cost.acc : 0), 0);
   const avg = key => allMetrics.reduce((s, m) => s + (m ? m[key] : 0), 0) / dayCount;
 
   const avgTiredness = avg('tiredness'); // Note: we use norm
@@ -689,7 +693,7 @@ function calcTripMetrics() {
 
   return {
     allMetrics,
-    totalCost,
+    totalCost, totalEntries, totalMeals, totalTransport, totalAcc,
     avgTirednessNorm,
     avgFamilyFriendly,
     avgLogisticalFriction,
@@ -2025,6 +2029,12 @@ function openTripOverviewModal() {
     <div class="metric-section">
       <div class="metric-section-title">💰 Total Estimated Budget</div>
       <div class="trip-budget-total">€${tripMetrics.totalCost.toFixed(0)}</div>
+      <div class="cost-breakdown" style="margin-top:6px;">
+        <div class="cost-item"><span class="cost-item-label">Entries</span><span class="cost-item-value">€${tripMetrics.totalEntries.toFixed(0)}</span></div>
+        <div class="cost-item"><span class="cost-item-label">Meals</span><span class="cost-item-value">€${tripMetrics.totalMeals.toFixed(0)}</span></div>
+        ${tripMetrics.totalTransport > 0 ? `<div class="cost-item"><span class="cost-item-label">Transport</span><span class="cost-item-value">€${tripMetrics.totalTransport.toFixed(0)}</span></div>` : ''}
+        ${tripMetrics.totalAcc > 0 ? `<div class="cost-item"><span class="cost-item-label">Accommodation</span><span class="cost-item-value">€${tripMetrics.totalAcc.toFixed(0)}</span></div>` : ''}
+      </div>
     </div>
     <div class="metric-section">
       <div class="metric-section-title">📈 Trip Averages</div>
@@ -2111,6 +2121,7 @@ function setDayAcc(date, accId) {
   Storage.save();
   placeMarkers();
   renderAll();
+  drawRoute(State.selectedDayIndex);
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
 }
 
@@ -2290,9 +2301,11 @@ function saveAccEdit() {
   };
   Storage.saveAccEdits(State.trip.id);
   Storage.saveUserAccs(State.trip.id);
+  _pendingNewAccId = null;
   closeAccEditModal();
   placeMarkers();
   renderAll();
+  drawRoute(State.selectedDayIndex);
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   showToast('Accommodation updated');
 }
