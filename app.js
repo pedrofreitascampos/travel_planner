@@ -3050,9 +3050,11 @@ function injectModals() {
         <textarea id="import-json" class="import-textarea" placeholder="Paste Google Takeout JSON here..."></textarea>
         <div id="import-preview"></div>
       </div>
-      <div class="modal-actions">
+      <div class="modal-actions" style="flex-wrap:wrap;gap:6px;">
+        <button class="modal-btn" style="background:var(--color-card-bg);border:1px solid var(--color-border);color:var(--color-text-secondary);margin-right:auto;"
+          onclick="App.importPlanFile()" title="Load a previously exported plan .json file">📁 Import Plan File</button>
         <button class="modal-btn modal-btn-cancel" onclick="App.closeImportModal()">Cancel</button>
-        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import</button>
+        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import Google Maps</button>
       </div>
     </div>
   </div>
@@ -3097,9 +3099,206 @@ function injectModals() {
   </div>
   `;
 
+  const shareModalHtml = `
+  <!-- Share / Export Modal -->
+  <div id="share-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div class="modal-title">🔗 Share Plan</div>
+        <button class="modal-close-btn" onclick="App.closeShareModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="share-options">
+          <button class="share-option-btn" onclick="App.exportPlan()">
+            <span class="share-option-icon">📁</span>
+            <div class="share-option-text">
+              <div class="share-option-label">Download .json</div>
+              <div class="share-option-desc">Send the file via WhatsApp, email, etc. Recipient imports it.</div>
+            </div>
+          </button>
+          <button class="share-option-btn" id="btn-generate-link" onclick="App.generateShareLink()">
+            <span class="share-option-icon">🔗</span>
+            <div class="share-option-text">
+              <div class="share-option-label">Generate short link</div>
+              <div class="share-option-desc">Anyone with the link can open the plan in their browser.</div>
+            </div>
+          </button>
+        </div>
+        <div id="share-link-area" style="display:none">
+          <div id="share-status" class="share-status"></div>
+          <div class="share-link-row">
+            <input type="text" id="share-link-input" class="share-link-input" readonly placeholder="Generating…">
+            <button id="share-copy-btn" class="share-copy-btn" onclick="App.copyShareLink()" disabled>Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared Plan Banner (shown when ?share= param detected) -->
+  <div id="shared-plan-banner" class="shared-plan-banner hidden">
+    <span id="shared-plan-msg">📤 Someone shared a plan with you</span>
+    <div class="shared-plan-actions">
+      <button class="shared-plan-btn shared-plan-btn-load" onclick="App.loadSharedPlan()">Load it</button>
+      <button class="shared-plan-btn" onclick="App.dismissSharedPlan()">Dismiss</button>
+    </div>
+  </div>
+  `;
+
   const container = document.createElement('div');
-  container.innerHTML = modalsHtml;
+  container.innerHTML = modalsHtml + shareModalHtml;
   document.body.appendChild(container);
+}
+
+// ─── Export / Share ────────────────────────────────────────────
+
+function buildSharePayload() {
+  return {
+    version: 1,
+    tripId: State.trip.id,
+    plan: State.plan,
+    accEdits: State.accEdits,
+    importedPois: State.importedPois,
+  };
+}
+
+function exportPlan() {
+  if (!State.trip) return;
+  const json = JSON.stringify(buildSharePayload(), null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${State.trip.id}-plan.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Plan downloaded');
+}
+
+async function generateShareLink() {
+  if (!State.trip) return;
+  const area = document.getElementById('share-link-area');
+  const statusEl = document.getElementById('share-status');
+  const inputEl = document.getElementById('share-link-input');
+  const copyBtn = document.getElementById('share-copy-btn');
+  area.style.display = '';
+  statusEl.textContent = '⏳ Compressing plan…';
+  inputEl.value = '';
+  copyBtn.disabled = true;
+
+  const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(buildSharePayload()));
+  const fullUrl = `${location.origin}${location.pathname}?share=${compressed}`;
+
+  statusEl.textContent = '⏳ Shortening link…';
+  try {
+    const r = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(fullUrl)}`);
+    if (!r.ok) throw new Error();
+    const shortUrl = (await r.text()).trim();
+    inputEl.value = shortUrl;
+    statusEl.textContent = '✅ Ready — send this link to anyone';
+    copyBtn.disabled = false;
+  } catch {
+    inputEl.value = fullUrl;
+    statusEl.textContent = '⚠️ Shortener unavailable — copy the full link below';
+    copyBtn.disabled = false;
+  }
+}
+
+function copyShareLink() {
+  const val = document.getElementById('share-link-input')?.value;
+  if (!val) return;
+  navigator.clipboard?.writeText(val).then(() => showToast('Copied!')).catch(() => {
+    document.getElementById('share-link-input').select();
+    document.execCommand('copy');
+    showToast('Copied!');
+  });
+}
+
+function openShareModal() {
+  if (!State.trip) return;
+  const area = document.getElementById('share-link-area');
+  if (area) area.style.display = 'none';
+  document.getElementById('share-modal')?.classList.remove('hidden');
+}
+
+function closeShareModal() {
+  document.getElementById('share-modal')?.classList.add('hidden');
+}
+
+// ── Shared plan via URL ──────────────────────────────────────────
+let _pendingSharedPayload = null;
+
+function checkShareParam() {
+  const param = new URLSearchParams(location.search).get('share');
+  if (!param) return;
+  try {
+    const data = JSON.parse(LZString.decompressFromEncodedURIComponent(param));
+    if (!data?.tripId || !data?.plan) return;
+    _pendingSharedPayload = data;
+    const banner = document.getElementById('shared-plan-banner');
+    if (banner) {
+      document.getElementById('shared-plan-msg').textContent =
+        `📤 Shared plan for "${data.tripId}" — load it?`;
+      banner.classList.remove('hidden');
+    }
+    // Clean URL without reloading
+    history.replaceState(null, '', location.pathname);
+  } catch { /* malformed share param — ignore */ }
+}
+
+function loadSharedPlan() {
+  const data = _pendingSharedPayload;
+  if (!data) return;
+  dismissSharedPlan();
+  const trip = tripRegistry.find(t => t.id === data.tripId);
+  if (!trip) { showToast('Trip not found — make sure you have the same trip loaded'); return; }
+  loadTrip(data.tripId);
+  // Apply after loadTrip initialises state
+  requestAnimationFrame(() => {
+    if (data.plan) { State.plan = data.plan; Storage.save(); }
+    if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
+    if (data.importedPois?.length) {
+      State.importedPois = data.importedPois;
+      data.importedPois.forEach(poi => {
+        if (!State.trip.pois.find(p => p.id === poi.id)) State.trip.pois.push(poi);
+      });
+      Storage.saveImported(data.tripId);
+    }
+    renderAll();
+    showToast('Shared plan loaded ✅');
+  });
+}
+
+function dismissSharedPlan() {
+  document.getElementById('shared-plan-banner')?.classList.add('hidden');
+  _pendingSharedPayload = null;
+}
+
+// ── Import plan JSON file ────────────────────────────────────────
+function importPlanFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (data.version && data.tripId && data.plan) {
+        // It's a plan export
+        _pendingSharedPayload = data;
+        loadSharedPlan();
+      } else {
+        // Fall through to Google Maps import
+        document.getElementById('import-json').value = text;
+        openImportModal();
+      }
+    } catch { showToast('Could not read file'); }
+  };
+  input.click();
 }
 
 // ─── Header Buttons Injection ──────────────────────────────────
@@ -3133,6 +3332,13 @@ function injectHeaderButtons() {
   btnImport.onclick = () => App.openImportModal();
   btnImport.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
 
+  const btnShare = document.createElement('button');
+  btnShare.id = 'btn-share';
+  btnShare.title = 'Share / export plan';
+  btnShare.textContent = '🔗';
+  btnShare.onclick = () => App.openShareModal();
+  btnShare.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
+
   const btnOverview = document.createElement('button');
   btnOverview.id = 'btn-trip-overview';
   btnOverview.title = 'Trip overview & metrics';
@@ -3150,11 +3356,13 @@ function injectHeaderButtons() {
   if (resetBtn) {
     header.insertBefore(btnPin, resetBtn);
     header.insertBefore(btnImport, resetBtn);
+    header.insertBefore(btnShare, resetBtn);
     header.insertBefore(btnOverview, resetBtn);
     header.insertBefore(btnSettings, resetBtn);
   } else {
     header.appendChild(btnPin);
     header.appendChild(btnImport);
+    header.appendChild(btnShare);
     header.appendChild(btnOverview);
     header.appendChild(btnSettings);
   }
@@ -3206,6 +3414,14 @@ window.App = {
   saveAccEdit,
   accLocationSearch,
   selectAccLocation,
+  exportPlan,
+  generateShareLink,
+  copyShareLink,
+  openShareModal,
+  closeShareModal,
+  loadSharedPlan,
+  dismissSharedPlan,
+  importPlanFile,
 };
 
 // ─── Initialization ────────────────────────────────────────────
@@ -3216,6 +3432,8 @@ function init() {
   injectModals();
   // Inject header buttons
   injectHeaderButtons();
+  // Check for ?share= URL param (must be after modals are injected)
+  checkShareParam();
 
   initLayerPanel();
   initBottomSheet();
