@@ -1211,6 +1211,62 @@ html, body {
 }
 .ntf-create:hover { opacity: 0.88; }
 
+/* ─── Discover & Search ─────────────────────────────────────────── */
+.discover-search-wrap {
+  padding: 8px 12px 4px;
+}
+.poi-search-input {
+  width: 100%; box-sizing: border-box;
+  padding: 8px 12px; border-radius: var(--radius-md);
+  border: 1.5px solid var(--color-border);
+  font-size: 13px; font-family: inherit;
+  transition: border-color var(--trans-fast);
+  background: white;
+}
+.poi-search-input:focus { outline: none; border-color: var(--color-accent); }
+
+.search-results-host { padding: 0 8px; }
+
+.discover-group { margin: 4px 8px 0; }
+.discover-group-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: var(--color-text-secondary);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 8px 4px 4px; border-top: 1px solid var(--color-border);
+}
+.discover-load-btn {
+  margin-left: auto; background: none;
+  border: 1px solid var(--color-accent); color: var(--color-accent);
+  border-radius: 20px; padding: 2px 10px; font-size: 11px;
+  cursor: pointer; transition: all var(--trans-fast); white-space: nowrap;
+}
+.discover-load-btn:hover { background: var(--color-accent); color: white; }
+
+.discover-loading {
+  padding: 8px 4px; font-size: 12px; color: var(--color-text-light); font-style: italic;
+}
+.discover-empty {
+  padding: 8px 4px; font-size: 12px; color: var(--color-text-light);
+}
+.search-result-card { border-left: 2px solid var(--color-accent) !important; }
+
+/* Edit button on add-cards */
+.btn-edit-sm {
+  background: none; border: none; font-size: 13px;
+  cursor: pointer; padding: 2px 4px; opacity: 0.5;
+  transition: opacity var(--trans-fast);
+}
+.btn-edit-sm:hover { opacity: 1; }
+
+/* Settings: 2-column row and divider */
+.settings-divider {
+  font-size: 11px; font-weight: 700; color: var(--color-text-light);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 12px 0 4px; border-top: 1px solid var(--color-border); margin-top: 4px;
+}
+.settings-row-2 { display: flex; gap: 10px; }
+.settings-row-2 .settings-field { flex: 1; }
+
 /* ─── Custom Marker Modal ───────────────────────────────────────── */
 #btn-add-marker.active {
   background: var(--color-accent) !important;

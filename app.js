@@ -105,6 +105,8 @@ const State = {
     fuelPrice: 1.70,
     carConsumption: 7.5,
     dailyMealBudget: 22,
+    discoveryRadius: 5,       // km — nearby POI discovery
+    routeDiscoveryRadius: 3,  // km — along-route discovery
   },
   importedPois: [],       // POIs imported from Google Maps
   customMarkerMode: false, // true when user is dropping a custom pin
@@ -1177,13 +1179,44 @@ function renderDayPlanContent(dayIndex) {
 
     <div class="add-more-section">
       <div class="add-more-header" onclick="App.toggleAddMore(this)">
-        <div class="add-more-title">Add places (${available.length})</div>
+        <div class="add-more-title">Add places</div>
         <div class="add-more-toggle">▼</div>
       </div>
       <div class="add-more-list" style="display:none">
-        ${available.length === 0
-          ? '<div style="padding:10px;text-align:center;color:var(--color-text-light);font-size:12px;">All available places are in your plan!</div>'
-          : addMoreHtml}
+
+        <!-- Search -->
+        <div class="discover-search-wrap">
+          <input class="poi-search-input" type="text" placeholder="🔍 Search for a place…"
+            oninput="App.searchPois(this, ${dayIndex})">
+        </div>
+        <div class="search-results-host"></div>
+
+        ${day.driving ? `
+        <!-- Along the route -->
+        <div class="discover-group">
+          <div class="discover-group-label">
+            🛣️ Along the route
+            <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">Load</button>
+          </div>
+          <div class="route-discover-results"></div>
+        </div>` : ''}
+
+        <!-- Nearby -->
+        <div class="discover-group">
+          <div class="discover-group-label">
+            📍 Nearby · ${State.settings.discoveryRadius}km
+            <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
+          </div>
+          <div class="nearby-discover-results"></div>
+        </div>
+
+        ${available.length > 0 ? `
+        <!-- Trip suggestions -->
+        <div class="discover-group">
+          <div class="discover-group-label">💡 Suggested</div>
+          ${addMoreHtml}
+        </div>` : ''}
+
       </div>
     </div>
     <div style="height:24px"></div>
@@ -1234,6 +1267,7 @@ function buildPoiCardHtml(poiId, idx) {
       <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
     </div>
     <div class="poi-actions">
+      <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${poiId}')" title="Edit">✏️</button>
       <button class="btn-icon btn-detail" onclick="App.openDetail('${poiId}')" title="Details">ℹ</button>
       ${isBooked ? '' : `<button class="btn-icon btn-remove" onclick="App.removePoi('${poiId}')" title="Remove">✕</button>`}
     </div>
@@ -1242,13 +1276,15 @@ function buildPoiCardHtml(poiId, idx) {
 
 function buildAddCardHtml(poi) {
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
-  return `<div class="add-poi-card" onclick="App.addPoi('${poi.id}')">
-    <div class="add-poi-icon">${cat.icon}</div>
-    <div class="add-poi-info">
+  const icon = poi.emoji || cat.icon;
+  return `<div class="add-poi-card">
+    <div class="add-poi-icon">${icon}</div>
+    <div class="add-poi-info" onclick="App.addPoi('${poi.id}')">
       <div class="add-poi-name">${esc(poi.name)}${poi.confirmedBooking ? ' ⭐' : ''}</div>
       <div class="add-poi-meta">${poi.duration}h · ${poi.costLabel || 'Free'} · ${getKidsHtml(poi.kidsRating)}</div>
     </div>
-    <button class="btn-add-poi" onclick="event.stopPropagation();App.addPoi('${poi.id}')">+</button>
+    <button class="btn-icon btn-edit-sm" onclick="App.openPoiEditModal('${poi.id}')" title="Edit">✏️</button>
+    <button class="btn-add-poi" onclick="App.addPoi('${poi.id}')">+</button>
   </div>`;
 }
 
@@ -1732,6 +1768,10 @@ function openSettingsModal() {
   if (fuelInput) fuelInput.value = State.settings.fuelPrice;
   if (consumptionInput) consumptionInput.value = State.settings.carConsumption;
   if (mealInput) mealInput.value = State.settings.dailyMealBudget;
+  const radInput  = document.getElementById('settings-radius');
+  const routeRadInput = document.getElementById('settings-route-radius');
+  if (radInput) radInput.value = State.settings.discoveryRadius;
+  if (routeRadInput) routeRadInput.value = State.settings.routeDiscoveryRadius;
 
   updatePartyPreview();
   modal.classList.remove('hidden');
@@ -1769,6 +1809,10 @@ function saveSettings() {
   if (fuelInput) State.settings.fuelPrice = parseFloat(fuelInput.value) || 1.70;
   if (consumptionInput) State.settings.carConsumption = parseFloat(consumptionInput.value) || 7.5;
   if (mealInput) State.settings.dailyMealBudget = parseFloat(mealInput.value) || 22;
+  const radInput = document.getElementById('settings-radius');
+  const routeRadInput = document.getElementById('settings-route-radius');
+  if (radInput) State.settings.discoveryRadius = parseFloat(radInput.value) || 5;
+  if (routeRadInput) State.settings.routeDiscoveryRadius = parseFloat(routeRadInput.value) || 3;
 
   Storage.saveParty();
   Storage.saveSettings();
@@ -2039,6 +2083,294 @@ function saveCustomMarker(lat, lng) {
   placeMarkers();
   renderAll();
   showToast(`"${name}" added to the map`);
+}
+
+// ─── POI Search (Nominatim) ─────────────────────────────────────
+
+let _searchTimer = null;
+
+function searchPois(inputEl, dayIndex) {
+  const q = inputEl.value.trim();
+  const list = inputEl.closest('.add-more-list');
+  const resultsEl = list?.querySelector('.search-results-host');
+  if (!resultsEl) return;
+  clearTimeout(_searchTimer);
+  if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+  resultsEl.innerHTML = '<div class="discover-loading">🔍 Searching…</div>';
+  _searchTimer = setTimeout(async () => {
+    const results = await nominatimSearch(q, dayIndex);
+    if (!results?.length) {
+      resultsEl.innerHTML = '<div class="discover-empty">No results found</div>';
+      return;
+    }
+    resultsEl.innerHTML = results.map(r => buildSearchResultHtml(r, dayIndex)).join('');
+  }, 450);
+}
+
+async function nominatimSearch(query, dayIndex) {
+  const day = getDay(dayIndex);
+  const acc = State.trip?.accommodations.find(a => a.days.includes(day?.date));
+  const lat = acc?.lat, lng = acc?.lng;
+  const delta = 0.8;
+  try {
+    const params = new URLSearchParams({
+      format: 'json', limit: '8', q: query, addressdetails: '1', extratags: '1',
+      ...(lat && lng ? { viewbox: `${lng-delta},${lat+delta},${lng+delta},${lat-delta}`, bounded: '0' } : {}),
+    });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`,
+      { signal: ctrl.signal, headers: { 'Accept-Language': 'en' } });
+    clearTimeout(t);
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+function nominatimCategoryMap(type, cls) {
+  const m = {
+    museum: 'museum', attraction: 'monument', viewpoint: 'monument', artwork: 'monument',
+    gallery: 'museum', zoo: 'entertainment', theme_park: 'entertainment', aquarium: 'entertainment',
+    restaurant: 'food', bar: 'bar', cafe: 'food', pub: 'bar', fast_food: 'food',
+    park: 'park', garden: 'park', beach: 'beach', stadium: 'entertainment',
+    castle: 'monument', ruins: 'monument', monument: 'monument', church: 'monument',
+    palace: 'monument', cliff: 'nature', peak: 'nature', cave_entrance: 'cave',
+  };
+  return m[type] || m[cls] || 'monument';
+}
+
+function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex) {
+  const cat = CATEGORIES[category] || CATEGORIES.monument;
+  const safeName = esc(name.replace(/'/g, ''));
+  return `<div class="add-poi-card search-result-card">
+    <div class="add-poi-icon">${cat.icon}</div>
+    <div class="add-poi-info">
+      <div class="add-poi-name">${esc(name)}</div>
+      ${subtitle ? `<div class="add-poi-meta" style="font-size:11px;color:var(--color-text-light)">${esc(subtitle)}</div>` : ''}
+    </div>
+    <a class="btn-icon" href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}"
+       target="_blank" title="View on Google Maps" style="text-decoration:none;font-size:13px">🗺</a>
+    <button class="btn-add-poi"
+      onclick="App.addDiscoveredResult(${lat}, ${lng}, '${safeName}', '${category}', ${dayIndex})">+</button>
+  </div>`;
+}
+
+function buildSearchResultHtml(result, dayIndex) {
+  const name = result.name || result.display_name?.split(',')[0] || 'Unknown place';
+  const address = result.display_name?.split(',').slice(1, 3).join(',').trim() || '';
+  const category = nominatimCategoryMap(result.type, result.class);
+  return buildDiscoveredCardHtml(parseFloat(result.lat), parseFloat(result.lon),
+    name, category, address, dayIndex);
+}
+
+function addDiscoveredResult(lat, lng, name, category, dayIndex) {
+  if (!State.trip) return;
+  const day = getDay(dayIndex);
+  if (!day) return;
+  const id = 'disc-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 25) + '-' + Date.now();
+  const nearestAcc = findNearestAccommodation(lat, lng);
+  const availableDays = nearestAcc?.days || [day.date];
+  const poi = {
+    id, name, category, source: 'discovered', lat, lng,
+    description: `Discovered via search`,
+    rating: null, ratingCount: 0, cost: 'free', costAmount: 0, costLabel: '?',
+    duration: 1, energyCost: 2, kidsFriendly: 3, openingHours: '',
+    gmapsUrl: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+    availableDays, tags: ['discovered'],
+  };
+  State.trip.pois.push(poi);
+  State.importedPois.push(poi);
+  Storage.saveImported(State.trip.id);
+  if (State.plan[day.date] !== undefined) { State.plan[day.date].push(id); Storage.save(); }
+  placeMarkers(); renderAll();
+  showToast(`"${name}" added`);
+}
+
+// ─── Discover Nearby (Overpass API) ────────────────────────────
+
+async function overpassQuery(lat, lng, radiusM) {
+  const q = `[out:json][timeout:15];
+(node["tourism"~"^(museum|attraction|viewpoint|artwork|gallery|zoo|theme_park)$"](around:${radiusM},${lat},${lng});
+ node["amenity"~"^(restaurant|bar|cafe|pub)$"]["name"](around:${radiusM},${lat},${lng});
+ node["leisure"~"^(park|garden|beach)$"]["name"](around:${radiusM},${lat},${lng});
+ node["historic"~"^(castle|ruins|monument|building|church|palace|memorial)$"]["name"](around:${radiusM},${lat},${lng});
+ node["natural"~"^(beach|cliff|peak|cave_entrance)$"]["name"](around:${radiusM},${lat},${lng});
+);out body;`;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    return r.ok ? (await r.json()).elements || [] : null;
+  } catch { return null; }
+}
+
+function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, dayIndex) {
+  const existingNames = new Set(State.trip?.pois.map(p => p.name.toLowerCase()) || []);
+  const fresh = (elements || [])
+    .filter(e => e.tags?.name && !existingNames.has(e.tags.name.toLowerCase()))
+    .slice(0, 15);
+  const html = fresh.length
+    ? fresh.map(e => {
+        const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || 'attraction';
+        const cat = nominatimCategoryMap(type, type);
+        const dist = anchorLat ? haversineKm(anchorLat, anchorLng, e.lat, e.lon) : null;
+        const sub = [type, dist ? formatDist(dist) : null].filter(Boolean).join(' · ');
+        return buildDiscoveredCardHtml(e.lat, e.lon, e.tags.name, cat, sub, dayIndex);
+      }).join('')
+    : '<div class="discover-empty">No new places found. Try increasing the radius in settings.</div>';
+  document.querySelectorAll(containerSel).forEach(el => { el.innerHTML = html; });
+}
+
+async function discoverNearby(dayIndex) {
+  const day = getDay(dayIndex);
+  const acc = State.trip?.accommodations.find(a => a.days.includes(day?.date));
+  if (!acc?.lat && !acc?.lng) { showToast('No coordinates for this day\'s accommodation'); return; }
+  document.querySelectorAll('.nearby-discover-results').forEach(el => {
+    el.innerHTML = '<div class="discover-loading">🔍 Searching nearby…</div>';
+  });
+  const radiusM = (State.settings.discoveryRadius || 5) * 1000;
+  const elements = await overpassQuery(acc.lat, acc.lng, radiusM);
+  if (!elements) {
+    document.querySelectorAll('.nearby-discover-results').forEach(el => {
+      el.innerHTML = '<div class="discover-empty">Discovery service unavailable. Try again.</div>';
+    });
+    return;
+  }
+  renderDiscoverResults(elements, '.nearby-discover-results', acc.lat, acc.lng, dayIndex);
+}
+
+async function discoverAlongRoute(dayIndex) {
+  const day = getDay(dayIndex);
+  if (!day?.driving) return;
+  document.querySelectorAll('.route-discover-results').forEach(el => {
+    el.innerHTML = '<div class="discover-loading">🔍 Searching along route…</div>';
+  });
+  // Use route midpoint if available, otherwise midpoint between origin and destination accommodations
+  let midLat, midLng;
+  const geojsonCoords = State.lastRouteResult?.geojson?.coordinates;
+  if (geojsonCoords?.length >= 2) {
+    const [mLng, mLat] = geojsonCoords[Math.floor(geojsonCoords.length / 2)];
+    midLat = mLat; midLng = mLng;
+  } else {
+    // Fall back: midpoint between departure and arrival accommodations
+    const depAcc = State.trip?.accommodations.find(a =>
+      a.location?.toLowerCase().includes(day.driving.from?.toLowerCase()));
+    const arrAcc = State.trip?.accommodations.find(a =>
+      a.location?.toLowerCase().includes(day.driving.to?.toLowerCase()));
+    if (!depAcc || !arrAcc) { showToast('Load the route first for better results'); return; }
+    midLat = (depAcc.lat + arrAcc.lat) / 2;
+    midLng = (depAcc.lng + arrAcc.lng) / 2;
+  }
+  const radiusM = (State.settings.routeDiscoveryRadius || 3) * 1000;
+  const elements = await overpassQuery(midLat, midLng, radiusM);
+  if (!elements) {
+    document.querySelectorAll('.route-discover-results').forEach(el => {
+      el.innerHTML = '<div class="discover-empty">Discovery service unavailable. Try again.</div>';
+    });
+    return;
+  }
+  renderDiscoverResults(elements, '.route-discover-results', midLat, midLng, dayIndex);
+}
+
+// ─── POI Edit Modal ─────────────────────────────────────────────
+
+function openPoiEditModal(poiId) {
+  const poi = getPoi(poiId);
+  if (!poi) return;
+  let modal = document.getElementById('poi-edit-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'poi-edit-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const catOpts = Object.entries(CATEGORIES).map(([k, v]) =>
+    `<option value="${k}"${poi.category === k ? ' selected' : ''}>${v.icon} ${v.label}</option>`
+  ).join('');
+  const currentIcon = poi.emoji || CATEGORIES[poi.category]?.icon || '📍';
+  modal.innerHTML = `
+    <div class="modal-panel" style="max-width:400px">
+      <div class="modal-header">
+        <span class="modal-title">✏️ Edit Place</span>
+        <button class="modal-close-btn" onclick="document.getElementById('poi-edit-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-field">
+          <label class="settings-label">Name</label>
+          <input id="pe-name" type="text" class="settings-input" value="${esc(poi.name)}" autocomplete="off">
+        </div>
+        <div class="cm-row" style="align-items:flex-end;gap:10px">
+          <div class="settings-field" style="flex:1">
+            <label class="settings-label">Category → Icon</label>
+            <select id="pe-category" class="settings-input" onchange="App.pePreviewIcon()">${catOpts}</select>
+          </div>
+          <div class="settings-field" style="width:76px">
+            <label class="settings-label">Custom emoji</label>
+            <input id="pe-emoji" type="text" class="settings-input"
+              value="${esc(poi.emoji || '')}" placeholder="none"
+              style="text-align:center;font-size:18px;" maxlength="4"
+              oninput="App.pePreviewIcon()">
+          </div>
+          <div id="pe-icon-preview" style="font-size:30px;padding:4px 6px;line-height:1;align-self:flex-end">
+            ${currentIcon}
+          </div>
+        </div>
+        <div class="settings-row-2">
+          <div class="settings-field">
+            <label class="settings-label">Duration (h)</label>
+            <input id="pe-duration" type="number" class="settings-input" min="0.25" step="0.25" value="${poi.duration || 1}">
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Kids friendly</label>
+            <select id="pe-kids" class="settings-input">
+              ${[1,2,3,4,5].map(n => `<option value="${n}"${(poi.kidsFriendly||poi.kidsRating||3)===n?' selected':''}>${'🧒'.repeat(n)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Notes / description</label>
+          <input id="pe-notes" type="text" class="settings-input"
+            value="${esc((poi.description || '').slice(0, 200))}" placeholder="Any notes…">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel"
+          onclick="document.getElementById('poi-edit-modal').classList.add('hidden')">Cancel</button>
+        <button class="modal-btn modal-btn-save" onclick="App.savePoiEdit('${poiId}')">Save</button>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('pe-name')?.focus(), 50);
+}
+
+function pePreviewIcon() {
+  const emoji = document.getElementById('pe-emoji')?.value.trim();
+  const cat   = document.getElementById('pe-category')?.value;
+  const prev  = document.getElementById('pe-icon-preview');
+  if (prev) prev.textContent = emoji || CATEGORIES[cat]?.icon || '📍';
+}
+
+function savePoiEdit(poiId) {
+  const poi = getPoi(poiId);
+  if (!poi) return;
+  const name     = document.getElementById('pe-name')?.value.trim();
+  const category = document.getElementById('pe-category')?.value;
+  const emoji    = document.getElementById('pe-emoji')?.value.trim() || null;
+  const duration = parseFloat(document.getElementById('pe-duration')?.value);
+  const kids     = parseInt(document.getElementById('pe-kids')?.value, 10);
+  const notes    = document.getElementById('pe-notes')?.value.trim();
+  if (name) poi.name = name;
+  if (category) poi.category = category;
+  poi.emoji = emoji;
+  if (!isNaN(duration)) poi.duration = duration;
+  if (!isNaN(kids)) { poi.kidsFriendly = kids; poi.kidsRating = kids; }
+  if (notes !== undefined) poi.description = notes;
+  if (['imported', 'custom', 'discovered'].includes(poi.source)) Storage.saveImported(State.trip.id);
+  document.getElementById('poi-edit-modal')?.classList.add('hidden');
+  placeMarkers(); renderAll();
+  showToast('Place updated');
 }
 
 function importPois() {
@@ -2473,6 +2805,17 @@ function injectModals() {
           <label class="settings-label">Daily meal budget (€/person)</label>
           <input type="number" id="settings-meal" class="settings-input" min="0" step="1" placeholder="22">
         </div>
+        <div class="settings-divider">Discovery</div>
+        <div class="settings-row-2">
+          <div class="settings-field">
+            <label class="settings-label">Nearby radius (km)</label>
+            <input type="number" id="settings-radius" class="settings-input" min="1" max="50" step="1" placeholder="5">
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Along route (km)</label>
+            <input type="number" id="settings-route-radius" class="settings-input" min="1" max="30" step="1" placeholder="3">
+          </div>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="modal-btn modal-btn-cancel" onclick="App.closeSettingsModal()">Cancel</button>
@@ -2624,6 +2967,13 @@ window.App = {
   openCustomMarkerModal,
   closeCustomMarkerModal,
   saveCustomMarker,
+  searchPois,
+  addDiscoveredResult,
+  discoverNearby,
+  discoverAlongRoute,
+  openPoiEditModal,
+  pePreviewIcon,
+  savePoiEdit,
 };
 
 // ─── Initialization ────────────────────────────────────────────
