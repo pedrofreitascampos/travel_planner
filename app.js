@@ -1107,7 +1107,14 @@ async function drawRoute(dayIndex) {
   const day = getDay(dayIndex);
   if (!day) return;
   const plan = State.plan[day.date] || [];
-  const waypoints = plan.map(id => getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
+  const poiWaypoints = plan.map(id => getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
+  // Add accommodation as start/end point for the route
+  const acc = getEffectiveAcc(day.date);
+  const accCoords = acc ? getAccCoords(acc) : null;
+  const waypoints = [];
+  if (accCoords && accCoords.lat && accCoords.lng) waypoints.push([accCoords.lat, accCoords.lng]);
+  waypoints.push(...poiWaypoints);
+  if (accCoords && accCoords.lat && accCoords.lng && poiWaypoints.length > 0) waypoints.push([accCoords.lat, accCoords.lng]);
   if (waypoints.length < 2) {
     updateRouteSummaryUI(null);
     renderDayMetricsUI(dayIndex, 0);
@@ -1205,6 +1212,8 @@ async function findNearestAirport(lat, lng) {
   } catch { _airportCache[key] = null; return null; }
 }
 
+let _interCityGen = 0; // prevents stale async responses from adding layers
+
 async function drawInterCityRoute(dayIndex) {
   // Clear existing
   if (State.interCityPolyline) {
@@ -1216,6 +1225,7 @@ async function drawInterCityRoute(dayIndex) {
     State.interCityPolyline = null;
   }
   State.lastInterCityResult = null;
+  const gen = ++_interCityGen;
 
   const day = getDay(dayIndex);
   if (!day || !State.map) return;
@@ -1236,39 +1246,37 @@ async function drawInterCityRoute(dayIndex) {
   const tType = dayTransportOverride.type || 'driving';
 
   if (tType === 'flight') {
-    // Find nearest airports to departure and arrival
     const [depAirport, arrAirport] = await Promise.all([
       findNearestAirport(depC.lat, depC.lng),
       findNearestAirport(arrC.lat, arrC.lng),
     ]);
+    if (gen !== _interCityGen) return; // stale
 
     const layers = [];
     const depAP = depAirport || { lat: depC.lat, lng: depC.lng };
     const arrAP = arrAirport || { lat: arrC.lat, lng: arrC.lng };
 
-    // Leg 1: acc → departure airport (road)
     const leg1 = await fetchRoute([[depC.lat, depC.lng], [depAP.lat, depAP.lng]], 'driving');
+    if (gen !== _interCityGen) return;
     if (leg1?.geojson) {
       layers.push(L.geoJSON(leg1.geojson, {
         style: { color: '#78909c', weight: 3, opacity: 0.6, dashArray: '6,4' },
       }).addTo(State.map));
     }
 
-    // Leg 2: airport → airport (GCC arc)
     const pts = greatCirclePoints(depAP.lat, depAP.lng, arrAP.lat, arrAP.lng, 50);
     layers.push(L.polyline(pts, {
       color: '#e53935', weight: 3, opacity: 0.7, dashArray: '6,8',
     }).addTo(State.map));
 
-    // Leg 3: arrival airport → acc (road)
     const leg3 = await fetchRoute([[arrAP.lat, arrAP.lng], [arrC.lat, arrC.lng]], 'driving');
+    if (gen !== _interCityGen) return;
     if (leg3?.geojson) {
       layers.push(L.geoJSON(leg3.geojson, {
         style: { color: '#78909c', weight: 3, opacity: 0.6, dashArray: '6,4' },
       }).addTo(State.map));
     }
 
-    // Add airport markers
     if (depAirport) {
       layers.push(L.marker([depAirport.lat, depAirport.lng], {
         icon: L.divIcon({ html: `<div style="background:#1a1a2e;color:white;font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px;white-space:nowrap;">${depAirport.iata} ✈️</div>`, className: '', iconAnchor: [20, 10] }),
@@ -1281,8 +1289,7 @@ async function drawInterCityRoute(dayIndex) {
     }
 
     State.interCityPolyline = layers;
-    const geoCoords = pts.map(([lat, lng]) => [lng, lat]);
-    State.lastInterCityResult = { geojson: { coordinates: geoCoords } };
+    State.lastInterCityResult = { geojson: { coordinates: pts.map(([lat, lng]) => [lng, lat]) } };
     return;
   }
 
@@ -1295,6 +1302,7 @@ async function drawInterCityRoute(dayIndex) {
   const style = routeStyles[tType] || routeStyles.driving;
 
   const result = await fetchRoute([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], 'driving');
+  if (gen !== _interCityGen) return; // stale
   if (!result) return;
   State.lastInterCityResult = result;
 
