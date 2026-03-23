@@ -1216,6 +1216,20 @@ async function drawInterCityRoute(dayIndex) {
   }
 }
 
+// ─── Effective Day Label ────────────────────────────────────────
+function getEffectiveDayLabel(day) {
+  if (State.dayLabels?.[day.date]) return State.dayLabels[day.date];
+  const acc = getEffectiveAcc(day.date);
+  if (acc) {
+    const edit = State.accEdits[acc.id] || {};
+    const loc = edit.name || acc.location || acc.name || '';
+    // Extract city name (first part before comma)
+    const city = loc.split(',')[0].replace(/^(Accommodation|Home)\s*[—–-]\s*/i, '').trim();
+    if (city && city !== day.label) return city;
+  }
+  return day.label;
+}
+
 // ─── Weather Loading ───────────────────────────────────────────
 function getWeatherLocation(dayIndex) {
   const day = getDay(dayIndex);
@@ -1326,7 +1340,7 @@ function renderDayTabs() {
         style="${active ? `background:${color};` : ''}">
       <div class="tab-emoji">${day.emoji}</div>
       <div class="tab-weather"></div>
-      <div class="tab-label">${esc(State.dayLabels?.[day.date] || day.destination)}</div>
+      <div class="tab-label">${esc(getEffectiveDayLabel(day))}</div>
       <div class="tab-date">${formatShortDate(day.date)}</div>
     </div>`;
   }).join('');
@@ -1453,7 +1467,7 @@ function renderDayPlanContent(dayIndex) {
         <div class="day-header-info">
           <div class="day-header-title" contenteditable="true" spellcheck="false"
             onblur="App.saveDayLabel('${day.date}', this.textContent)"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">${esc(State.dayLabels?.[day.date] || day.label)}</div>
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">${esc(getEffectiveDayLabel(day))}</div>
           <div class="day-header-date">${formatDate(day.date)} · ${esc(day.country)}</div>
         </div>
       </div>
@@ -2305,6 +2319,7 @@ function setDayAcc(date, accId) {
   renderAll();
   drawRoute(State.selectedDayIndex);
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+  loadAndRenderWeatherAll(State.selectedDayIndex);
 }
 
 function addNewAccommodation(forDate) {
