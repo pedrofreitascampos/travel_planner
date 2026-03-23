@@ -1093,17 +1093,17 @@ async function drawRoute(dayIndex) {
   if (result.geojson) {
     State.routePolyline = L.geoJSON(result.geojson, {
       style: {
-        color: getDayColor(dayIndex),
+        color: '#1565c0',
         weight: 4,
-        opacity: 0.75,
+        opacity: 0.8,
         dashArray: dayMode === 'foot' ? '8,4' : null,
       },
     }).addTo(State.map);
   } else {
     State.routePolyline = L.polyline(waypoints, {
-      color: getDayColor(dayIndex),
+      color: '#1565c0',
       weight: 3,
-      opacity: 0.55,
+      opacity: 0.6,
       dashArray: '6,6',
     }).addTo(State.map);
   }
