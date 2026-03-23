@@ -734,6 +734,17 @@ function renderRadarChartSVG(metrics, accentColor) {
   </svg>`;
 }
 
+// Tooltip descriptions for each metric bar label
+const METRIC_TOOLTIPS = {
+  'Family Fit':   'How suitable this day is for your party — influenced by kids-friendly ratings, museum density, and drive time',
+  'Cultural':     'Cultural richness of the day — monuments, museums, and historic sites',
+  'Gastronomic':  'Food & drink experience — restaurants, local cuisine, markets, and bars',
+  'Relaxation':   'How restful the day is — beaches, parks, and nature outweigh heavy sightseeing',
+  'Fun':          'Overall enjoyment factor — entertainment, variety, and spontaneity',
+  'Kids Fun':     'Fun specifically for the kids in your party — playgrounds, beaches, and kid-rated activities',
+  'Logistics':    'Smoothness of the day — higher is better; penalised by transfers, bookings, and friction',
+};
+
 // ─── Metric Bar HTML ───────────────────────────────────────────
 function renderMetricBar(icon, label, value, inverted) {
   const displayVal = inverted ? value : value;
@@ -743,7 +754,8 @@ function renderMetricBar(icon, label, value, inverted) {
   else if (displayVal >= 5)  color = '#2980b9';
   else if (displayVal >= 3)  color = '#f39c12';
   else                        color = '#e74c3c';
-  return `<div class="metric-bar-row">
+  const tooltip = METRIC_TOOLTIPS[label] || label;
+  return `<div class="metric-bar-row" title="${tooltip}: ${displayVal.toFixed(1)}/10">
     <span class="metric-bar-icon">${icon}</span>
     <span class="metric-bar-label">${label}</span>
     <div class="metric-bar-track">
@@ -779,15 +791,15 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
 
   const html = `
     <div class="metrics-row-main">
-      <div class="metric-pill cost-pill">💰 €${metrics.cost.total.toFixed(0)}</div>
-      <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}">😓 ${metrics.tiredness.level}</div>
-      <div class="metric-pill overall-pill">⭐ ${metrics.overall.toFixed(1)}/10</div>
+      <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.fuel > 0 ? ` + fuel €${metrics.cost.fuel.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
+      <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}" title="Tiredness: ${metrics.tiredness.norm.toFixed(1)}/10 — based on walking distance, activity durations, and ages in your party">😓 ${metrics.tiredness.level}</div>
+      <div class="metric-pill overall-pill" title="Overall day score: ${metrics.overall.toFixed(1)}/10 — weighted average of family fit, culture, food, relaxation, fun, and logistics">⭐ ${metrics.overall.toFixed(1)}/10</div>
     </div>
     <div class="party-info-line">
       👨‍👩‍👧‍👦 ${esc(partyDesc)}${esc(kidsStr)} · <a href="#" onclick="event.preventDefault();App.openSettingsModal()" class="party-settings-link">Settings</a>
     </div>
     <details class="metrics-details">
-      <summary>📊 Day Analysis</summary>
+      <summary title="Expand to see cost breakdown, score bars, radar chart, and suggestions">📊 Day Analysis</summary>
       <div class="metrics-details-inner">
         <div class="metric-section">
           <div class="metric-section-title">💰 Estimated Cost</div>
@@ -2138,19 +2150,40 @@ function nominatimCategoryMap(type, cls) {
   return m[type] || m[cls] || 'monument';
 }
 
-function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex) {
+// Cache discovered results by key so data-attribute delegation works safely
+// (avoids any inline-onclick escaping issues)
+const _discCache = new Map();
+
+function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, osmTags) {
   const cat = CATEGORIES[category] || CATEGORIES.monument;
-  const safeName = esc(name.replace(/'/g, ''));
+  const key = `${lat.toFixed(6)},${lng.toFixed(6)},${Date.now()},${Math.random()}`;
+  _discCache.set(key, { lat, lng, name, category, dayIndex, osmTags: osmTags || {} });
+  // Keep cache tidy
+  if (_discCache.size > 300) _discCache.delete(_discCache.keys().next().value);
+
+  // Mini meta from OSM tags
+  const t = osmTags || {};
+  const bits = [
+    t.cuisine              ? `🍴 ${t.cuisine.split(';')[0].replace(/_/g,' ')}` : null,
+    t['michelin:stars']    ? `${'⭐'.repeat(+t['michelin:stars'])} Michelin`   : null,
+    t.stars                ? `${'★'.repeat(Math.min(+t.stars,5))} stars`        : null,
+    t.opening_hours        ? `🕐 ${t.opening_hours.split(';')[0]}`              : null,
+    t.wheelchair === 'yes' ? `♿`                                               : null,
+  ].filter(Boolean);
+
+  // Google Maps search URL — name + coords = GMaps shows the place with live ratings
+  const gmapsSearch = `https://www.google.com/maps/search/${encodeURIComponent(name)}/@${lat},${lng},17z`;
+
   return `<div class="add-poi-card search-result-card">
     <div class="add-poi-icon">${cat.icon}</div>
     <div class="add-poi-info">
       <div class="add-poi-name">${esc(name)}</div>
-      ${subtitle ? `<div class="add-poi-meta" style="font-size:11px;color:var(--color-text-light)">${esc(subtitle)}</div>` : ''}
+      ${subtitle ? `<div class="add-poi-meta disc-subtitle">${esc(subtitle)}</div>` : ''}
+      ${bits.length ? `<div class="disc-osm-tags">${bits.map(esc).join(' · ')}</div>` : ''}
+      <a class="disc-gmaps-rating" href="${gmapsSearch}" target="_blank" rel="noopener"
+         onclick="event.stopPropagation()">🌟 Ratings &amp; reviews on Google Maps ↗</a>
     </div>
-    <a class="btn-icon" href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}"
-       target="_blank" title="View on Google Maps" style="text-decoration:none;font-size:13px">🗺</a>
-    <button class="btn-add-poi"
-      onclick="App.addDiscoveredResult(${lat}, ${lng}, '${safeName}', '${category}', ${dayIndex})">+</button>
+    <button class="btn-add-poi disc-add-btn" data-disc-key="${esc(key)}" title="Add to day">+</button>
   </div>`;
 }
 
@@ -2158,24 +2191,33 @@ function buildSearchResultHtml(result, dayIndex) {
   const name = result.name || result.display_name?.split(',')[0] || 'Unknown place';
   const address = result.display_name?.split(',').slice(1, 3).join(',').trim() || '';
   const category = nominatimCategoryMap(result.type, result.class);
+  const tags = result.extratags || {};
   return buildDiscoveredCardHtml(parseFloat(result.lat), parseFloat(result.lon),
-    name, category, address, dayIndex);
+    name, category, address, dayIndex, tags);
 }
 
-function addDiscoveredResult(lat, lng, name, category, dayIndex) {
+function addDiscoveredResult(lat, lng, name, category, dayIndex, osmTags) {
   if (!State.trip) return;
   const day = getDay(dayIndex);
   if (!day) return;
-  const id = 'disc-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 25) + '-' + Date.now();
+  const t = osmTags || {};
+  const id = 'disc-' + name.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,25) + '-' + Date.now();
   const nearestAcc = findNearestAccommodation(lat, lng);
-  const availableDays = nearestAcc?.days || [day.date];
+  const descParts = [
+    t.cuisine      ? `Cuisine: ${t.cuisine.replace(/_/g,' ')}` : null,
+    t.opening_hours? `Hours: ${t.opening_hours}`               : null,
+    t.website      ? `Website: ${t.website}`                   : null,
+  ].filter(Boolean);
   const poi = {
     id, name, category, source: 'discovered', lat, lng,
-    description: `Discovered via search`,
-    rating: null, ratingCount: 0, cost: 'free', costAmount: 0, costLabel: '?',
-    duration: 1, energyCost: 2, kidsFriendly: 3, openingHours: '',
-    gmapsUrl: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
-    availableDays, tags: ['discovered'],
+    description: descParts.join(' · ') || 'Discovered via search/nearby',
+    rating: t.stars ? Math.min(parseFloat(t.stars), 5) : null,
+    ratingCount: 0, cost: 'free', costAmount: 0, costLabel: '?',
+    duration: 1, energyCost: 2, kidsFriendly: 3,
+    openingHours: t.opening_hours || '',
+    gmapsUrl: `https://www.google.com/maps/search/${encodeURIComponent(name)}/@${lat},${lng},17z`,
+    availableDays: nearestAcc?.days || [day.date],
+    tags: ['discovered'],
   };
   State.trip.pois.push(poi);
   State.importedPois.push(poi);
@@ -2217,7 +2259,7 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
         const cat = nominatimCategoryMap(type, type);
         const dist = anchorLat ? haversineKm(anchorLat, anchorLng, e.lat, e.lon) : null;
         const sub = [type, dist ? formatDist(dist) : null].filter(Boolean).join(' · ');
-        return buildDiscoveredCardHtml(e.lat, e.lon, e.tags.name, cat, sub, dayIndex);
+        return buildDiscoveredCardHtml(e.lat, e.lon, e.tags.name, cat, sub, dayIndex, e.tags);
       }).join('')
     : '<div class="discover-empty">No new places found. Try increasing the radius in settings.</div>';
   document.querySelectorAll(containerSel).forEach(el => { el.innerHTML = html; });
@@ -2987,6 +3029,15 @@ function init() {
 
   initLayerPanel();
   initBottomSheet();
+
+  // Delegate clicks on discovered/search result "+" add buttons
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.disc-add-btn');
+    if (!btn) return;
+    const data = _discCache.get(btn.dataset.discKey);
+    if (!data) { showToast('Result expired — search again'); return; }
+    addDiscoveredResult(data.lat, data.lng, data.name, data.category, data.dayIndex, data.osmTags);
+  });
 
   // Close modals on backdrop click
   document.addEventListener('click', e => {
