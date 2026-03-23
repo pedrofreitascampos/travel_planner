@@ -1374,14 +1374,13 @@ function renderDayPlanContent(dayIndex) {
     </div>` : '';
 
   // Accommodation for this day
-  // Night's accommodation (where you sleep)
-  const dayAcc = getEffectiveAcc(day.date);
-  // On driving days show departure (prev night or home) and arrival (tonight or home)
+  // Departure = previous night's acc (or home for first day) — read-only
   const prevDate = State.trip.days[dayIndex - 1]?.date;
-  let departureAcc = day.driving ? (prevDate ? getEffectiveAcc(prevDate) : getHomeAcc()) : null;
-  let arrivalAcc   = day.driving ? dayAcc : null;
-  // If arrival = departure (driving away), arrival is home
-  if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id) arrivalAcc = getHomeAcc();
+  const departureAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  // Arrival = tonight's acc — editable via dropdown
+  let arrivalAcc = getEffectiveAcc(day.date);
+  // If arrival = departure and it's a travel day, resolve to home
+  if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id && day.driving) arrivalAcc = getHomeAcc();
 
   const allAccs = State.trip.accommodations;
   const accSelectHtml = (selectedId, date) => {
@@ -1397,25 +1396,35 @@ function renderDayPlanContent(dayIndex) {
     </select>`;
   };
 
-  const accCardHtml = (currentAcc, label, date) => {
-    const edit = currentAcc ? (State.accEdits[currentAcc.id] || {}) : {};
-    const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
-    const notes = currentAcc ? (edit.notes !== undefined ? edit.notes : (currentAcc.notes || '')) : '';
+  // Read-only departure card (derived from previous night)
+  const departCardHtml = (() => {
+    if (!departureAcc) return '';
+    const edit = State.accEdits[departureAcc.id] || {};
+    const name = edit.name || departureAcc.name;
     return `
-    <div class="acc-card">
-      <div class="acc-icon">${currentAcc?.isHome ? '🏠' : '🏨'}</div>
+    <div class="acc-card acc-depart">
+      <div class="acc-icon">${departureAcc.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
-        <div class="acc-name"><span class="text-xs text-secondary">${esc(label)} — </span>${accSelectHtml(currentAcc?.id || '', date)}</div>
+        <div class="acc-name"><span class="text-xs text-secondary">Depart — </span>${esc(name)}</div>
+      </div>
+    </div>`;
+  })();
+
+  // Editable arrival card (tonight's accommodation)
+  const arriveCardHtml = (() => {
+    const edit = arrivalAcc ? (State.accEdits[arrivalAcc.id] || {}) : {};
+    const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
+    const notes = arrivalAcc ? (edit.notes !== undefined ? edit.notes : (arrivalAcc.notes || '')) : '';
+    return `
+    <div class="acc-card acc-arrive">
+      <div class="acc-icon">${arrivalAcc?.isHome ? '🏠' : '🏨'}</div>
+      <div class="acc-info">
+        <div class="acc-name"><span class="text-xs text-secondary">Arrive — </span>${accSelectHtml(arrivalAcc?.id || '', day.date)}</div>
         ${notes || priceStr ? `<div class="acc-note">${esc(notes)}${priceStr}</div>` : ''}
       </div>
-      ${currentAcc && !currentAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${currentAcc.id}')" title="Edit accommodation">✏️</button>` : ''}
+      ${arrivalAcc && !arrivalAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${arrivalAcc.id}')" title="Edit accommodation">✏️</button>` : ''}
     </div>`;
-  };
-
-  // On driving days: show depart (prev night) + arrive (tonight)
-  // On non-driving days: show tonight only
-  const tonightDate = day.date;
-  const tonightAccHtml = !day.driving ? accCardHtml(dayAcc, 'Tonight', tonightDate) : '';
+  })();
 
   // Build POI cards
   const poiCardsHtml = plan.length === 0
@@ -1447,12 +1456,11 @@ function renderDayPlanContent(dayIndex) {
 
     <div class="poi-list-section">
       <div class="section-label">Today's Plan</div>
-      ${day.driving && prevDate ? accCardHtml(departureAcc, 'Depart', prevDate) : ''}
+      ${departCardHtml}
       <div class="poi-list" data-day="${dayIndex}">
         ${poiCardsHtml}
       </div>
-      ${day.driving ? accCardHtml(arrivalAcc, 'Arrive', tonightDate) : ''}
-      ${tonightAccHtml}
+      ${arriveCardHtml}
     </div>
 
     <div class="add-more-section">
