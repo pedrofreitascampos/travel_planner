@@ -1751,15 +1751,6 @@ html, body {
   margin-top: 6px;
 }
 
-/* ─── Discovered card Google Maps link ─── */
-.disc-gmaps-link {
-  font-size: 10px;
-  color: var(--color-accent);
-  text-decoration: none;
-  margin-top: 1px;
-  display: inline-block;
-}
-.disc-gmaps-link:hover { text-decoration: underline; }
 
 /* ─── Accommodation Edit — location search ─── */
 .ae-search-results {

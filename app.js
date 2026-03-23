@@ -2890,7 +2890,6 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
       <div class="add-poi-name">${esc(name)} ${starHtml}</div>
       ${subtitle ? `<div class="add-poi-meta disc-subtitle">${esc(subtitle)}</div>` : ''}
       ${bits.length ? `<div class="disc-osm-tags">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
-      <a class="disc-gmaps-link" href="https://www.google.com/maps/search/${encodeURIComponent(name)}/@${lat},${lng},17z" target="_blank" rel="noopener" onclick="event.stopPropagation()">📍 Reviews</a>
     </div>
     <button class="btn-add-poi disc-add-btn" data-disc-key="${esc(key)}" title="Add to day">+</button>
   </div>`;
