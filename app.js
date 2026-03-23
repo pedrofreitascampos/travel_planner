@@ -1459,6 +1459,9 @@ function renderDayPlanContent(dayIndex) {
       </div>`
     : plan.map((id, idx) => buildPoiCardHtml(id, idx)).join('');
 
+  // Check if this is an inter-city travel day (for "along route" section)
+  const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
+
   // Available to add
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
@@ -1508,7 +1511,33 @@ function renderDayPlanContent(dayIndex) {
         </div>
         <div class="search-results-host"></div>
 
-        ${day.driving ? `
+        <!-- Suggestions (nearby + along route) -->
+        <div class="discover-group">
+          <div class="discover-group-label">
+            💡 Suggestions ·
+            <select class="discover-cat-filter" onchange="App.discoverNearby(${dayIndex}, this.value)">
+              <option value="all">All types</option>
+              <option value="food">🍽️ Restaurants</option>
+              <option value="bar">🍷 Bars & Cafés</option>
+              <option value="monument">🏛️ Monuments</option>
+              <option value="museum">🎨 Museums</option>
+              <option value="park">🌳 Parks</option>
+              <option value="beach">🏖️ Beaches</option>
+              <option value="entertainment">🎢 Entertainment</option>
+              <option value="nature">🌿 Nature</option>
+            </select>
+            ·
+            <input type="number" class="discover-radius-input" min="1" max="50" step="1"
+              value="${State.settings.discoveryRadius}"
+              onchange="App.setDiscoveryRadius(this.value)" title="Search radius in km"> km
+            <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
+          </div>
+          <div class="nearby-discover-results">
+            ${addMoreHtml || '<div class="discover-empty">Click Load to discover places nearby</div>'}
+          </div>
+        </div>
+
+        ${hasInterCity ? `
         <!-- Along the route -->
         <div class="discover-group">
           <div class="discover-group-label">
@@ -1519,25 +1548,6 @@ function renderDayPlanContent(dayIndex) {
             <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">Load</button>
           </div>
           <div class="route-discover-results"></div>
-        </div>` : ''}
-
-        <!-- Nearby -->
-        <div class="discover-group">
-          <div class="discover-group-label">
-            📍 Nearby ·
-            <input type="number" class="discover-radius-input" min="1" max="50" step="1"
-              value="${State.settings.discoveryRadius}"
-              onchange="App.setDiscoveryRadius(this.value)" title="Search radius in km"> km
-            <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
-          </div>
-          <div class="nearby-discover-results"></div>
-        </div>
-
-        ${available.length > 0 ? `
-        <!-- Trip suggestions -->
-        <div class="discover-group">
-          <div class="discover-group-label">💡 Suggested</div>
-          ${addMoreHtml}
         </div>` : ''}
 
       </div>
@@ -2373,6 +2383,7 @@ function setTransportType(date, type) {
   State.dayTransport[date].type = type;
   Storage.save();
   renderAll();
+  drawRoute(State.selectedDayIndex); // redraws inter-city route (flight GCC vs driving)
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
 }
 
@@ -2879,7 +2890,19 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
   const existingNames = new Set(State.trip?.pois.map(p => p.name.toLowerCase()) || []);
   const fresh = (elements || [])
     .filter(e => e.tags?.name && !existingNames.has(e.tags.name.toLowerCase()))
-    .filter(e => (e.lat && e.lon) || (e.center?.lat && e.center?.lon)) // must have coords
+    .filter(e => (e.lat && e.lon) || (e.center?.lat && e.center?.lon))
+    // Sort: places with ratings/stars first, then by distance
+    .sort((a, b) => {
+      const ra = parseFloat(a.tags?.stars || a.tags?.['michelin:stars'] || 0);
+      const rb = parseFloat(b.tags?.stars || b.tags?.['michelin:stars'] || 0);
+      if (rb !== ra) return rb - ra;
+      if (anchorLat) {
+        const da = haversineKm(anchorLat, anchorLng, a.lat ?? a.center?.lat, a.lon ?? a.center?.lon);
+        const db = haversineKm(anchorLat, anchorLng, b.lat ?? b.center?.lat, b.lon ?? b.center?.lon);
+        return da - db;
+      }
+      return 0;
+    })
     .slice(0, 20);
   const html = fresh.length
     ? fresh.map(e => {
@@ -2895,12 +2918,12 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
   document.querySelectorAll(containerSel).forEach(el => { el.innerHTML = html; });
 }
 
-async function discoverNearby(dayIndex) {
+async function discoverNearby(dayIndex, categoryFilter) {
   const day = getDay(dayIndex);
   const acc = getEffectiveAcc(day?.date);
   if (!acc) { showToast('No accommodation set for this day'); return; }
   document.querySelectorAll('.nearby-discover-results').forEach(el => {
-    el.innerHTML = '<div class="discover-loading">🔍 Searching nearby…</div>';
+    el.innerHTML = '<div class="discover-loading">🔍 Searching…</div>';
   });
   const radiusM = (State.settings.discoveryRadius || 5) * 1000;
   const { lat: aLat, lng: aLng } = getAccCoords(acc);
@@ -2911,7 +2934,13 @@ async function discoverNearby(dayIndex) {
     });
     return;
   }
-  renderDiscoverResults(elements, '.nearby-discover-results', aLat, aLng, dayIndex);
+  // Filter by category if specified
+  const cat = categoryFilter || document.querySelector('.discover-cat-filter')?.value || 'all';
+  const filtered = cat === 'all' ? elements : elements.filter(e => {
+    const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || '';
+    return nominatimCategoryMap(type, type) === cat;
+  });
+  renderDiscoverResults(filtered, '.nearby-discover-results', aLat, aLng, dayIndex);
 }
 
 async function discoverAlongRoute(dayIndex) {
