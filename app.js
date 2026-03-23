@@ -109,7 +109,9 @@ const State = {
     routeDiscoveryRadius: 3,  // km — along-route discovery
   },
   importedPois: [],       // POIs imported from Google Maps
-  accEdits: {},           // accId → { name, notes, pricePerNight }
+  accEdits: {},           // accId → { name, notes, pricePerNight, lat, lng }
+  dayAccAssignments: {},  // 'YYYY-MM-DD' → accId override
+  dayTransport: {},       // 'YYYY-MM-DD' → { type, costPerPerson, durationMin }
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -127,6 +129,8 @@ const Storage = {
         plan: State.plan,
         layers: State.layers,
         selectedDayIndex: State.selectedDayIndex,
+        dayAccAssignments: State.dayAccAssignments,
+        dayTransport: State.dayTransport,
       }));
     } catch (e) { /* quota exceeded — ignore */ }
   },
@@ -438,15 +442,23 @@ function calcDayMetrics(dayIndex, routeDistKm) {
     return sum + (isNaN(amt) ? (isNaN(fallback) ? 0 : fallback) : amt);
   }, 0) * partySize;
   const mealsCost = dailyMealBudget * partySize;
+  const dayTransportOverride = State.dayTransport[day.date] || {};
+  const transportType = dayTransportOverride.type || (day.driving ? 'driving' : null);
   let fuelCost = 0;
+  let transportCost = 0;
   if (day.driving) {
-    const km = routeDistKm || day.driving.approxKm || 0;
-    fuelCost = (km / 100) * carConsumption * fuelPrice;
+    if (transportType === 'driving') {
+      const km = routeDistKm || day.driving.approxKm || 0;
+      fuelCost = (km / 100) * carConsumption * fuelPrice;
+      transportCost = fuelCost;
+    } else if (dayTransportOverride.costPerPerson) {
+      transportCost = dayTransportOverride.costPerPerson * partySize;
+    }
   }
-  const dayAcc = State.trip?.accommodations.find(a => a.days.includes(day.date));
+  const dayAcc = getEffectiveAcc(day.date);
   const accEdit = dayAcc ? (State.accEdits[dayAcc.id] || {}) : {};
   const accCost = parseFloat(accEdit.pricePerNight) || 0;
-  const totalCost = poiEntryCost + mealsCost + fuelCost + accCost;
+  const totalCost = poiEntryCost + mealsCost + transportCost + accCost;
 
   // ── Tiredness ─────────────────────────────────────────────────
   const tirednessRaw = pois.reduce((sum, p) => sum + (p.duration || 1) * (p.energyCost || 2), 0) + walkKm * 2;
@@ -606,7 +618,7 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   }
 
   return {
-    cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, acc: accCost, total: totalCost },
+    cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, transport: transportCost, acc: accCost, total: totalCost },
     tiredness: { raw: tirednessRaw, score: tirednessScore, norm: tirednessNorm, level: tirednessLevel, color: tirednessColor },
     familyFriendly,
     logisticalFriction,
@@ -790,8 +802,8 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
   const tirednessLevelClass = metrics.tiredness.level.toLowerCase();
   const accentColor = getDayColor(dayIndex);
 
-  const fuelHtml = metrics.cost.fuel > 0
-    ? `<div class="cost-item"><span class="cost-item-label">Fuel</span><span class="cost-item-value">€${metrics.cost.fuel.toFixed(0)}</span></div>`
+  const fuelHtml = metrics.cost.transport > 0
+    ? `<div class="cost-item"><span class="cost-item-label">Transport</span><span class="cost-item-value">€${metrics.cost.transport.toFixed(0)}</span></div>`
     : '';
   const accCostHtml = metrics.cost.acc > 0
     ? `<div class="cost-item"><span class="cost-item-label">Accommodation</span><span class="cost-item-value">€${metrics.cost.acc.toFixed(0)}</span></div>`
@@ -811,7 +823,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
 
   const html = `
     <div class="metrics-row-main">
-      <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.fuel > 0 ? ` + fuel €${metrics.cost.fuel.toFixed(0)}` : ''}${metrics.cost.acc > 0 ? ` + accommodation €${metrics.cost.acc.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
+      <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.transport > 0 ? ` + transport €${metrics.cost.transport.toFixed(0)}` : ''}${metrics.cost.acc > 0 ? ` + accommodation €${metrics.cost.acc.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
       <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}" title="Tiredness: ${metrics.tiredness.norm.toFixed(1)}/10 — based on walking distance, activity durations, and ages in your party">😓 ${metrics.tiredness.level}</div>
       <div class="metric-pill overall-pill" title="Overall day score: ${metrics.overall.toFixed(1)}/10 — weighted average of family fit, culture, food, relaxation, fun, and logistics">⭐ ${metrics.overall.toFixed(1)}/10</div>
     </div>
@@ -1039,7 +1051,7 @@ function getWeatherLocation(dayIndex) {
     const poi = getPoi(id);
     if (poi) return { lat: poi.lat, lng: poi.lng };
   }
-  const acc = State.trip.accommodations.find(a => a.days.includes(day.date));
+  const acc = getEffectiveAcc(day.date);
   return acc ? getAccCoords(acc) : null;
 }
 
@@ -1145,25 +1157,51 @@ function renderDayPlanContent(dayIndex) {
   if (!day) return;
   const plan = State.plan[day.date] || [];
 
+  const TRANSPORT_TYPES = [
+    { type: 'driving', icon: '🚗', label: 'Drive' },
+    { type: 'flight',  icon: '✈️', label: 'Flight' },
+    { type: 'train',   icon: '🚂', label: 'Train' },
+    { type: 'bus',     icon: '🚌', label: 'Bus' },
+    { type: 'ferry',   icon: '⛴️', label: 'Ferry' },
+  ];
+  const dayTransport = State.dayTransport[day.date] || {};
+  const tType  = dayTransport.type || 'driving';
+  const tInfo  = TRANSPORT_TYPES.find(t => t.type === tType) || TRANSPORT_TYPES[0];
+  const estFlightMin = Math.ceil((day.driving?.approxKm || 0) / 800 * 60) + 90;
+  const displayMin = tType === 'flight' ? (dayTransport.durationMin || estFlightMin) : day.driving?.approxMin;
+  const costPerPersonField = tType !== 'driving' ? `
+    <div class="transport-cost-row">
+      <span class="transport-cost-label">€/person:</span>
+      <input type="number" class="transport-cost-input" min="0" step="1"
+        value="${dayTransport.costPerPerson || ''}" placeholder="0"
+        onchange="App.setTransportCost('${day.date}', this.value)">
+    </div>` : '';
+  const typeButtons = TRANSPORT_TYPES.map(t =>
+    `<button class="transport-type-btn${t.type === tType ? ' active' : ''}"
+      onclick="App.setTransportType('${day.date}', '${t.type}')"
+      title="${t.label}">${t.icon}</button>`
+  ).join('');
+
   const drivingHtml = day.driving ? `
     <div class="drive-info">
-      <div class="drive-info-icon">🚗</div>
+      <div class="drive-info-icon">${tInfo.icon}</div>
       <div class="drive-info-text">
         <div class="drive-info-label">${esc(day.driving.from)} → ${esc(day.driving.to)}</div>
-        <div class="drive-info-detail">~${formatDuration(day.driving.approxMin)} · ${day.driving.approxKm} km · ${esc(day.driving.note)}</div>
+        <div class="drive-info-detail">~${formatDuration(displayMin)} · ${day.driving.approxKm} km · ${esc(day.driving.note)}</div>
+      </div>
+      <div class="transport-type-group">
+        ${typeButtons}
+        ${costPerPersonField}
       </div>
     </div>` : '';
 
   // Accommodation for this day
-  const dayAcc = State.trip.accommodations.find(a => a.days.includes(day.date));
-  // Arrival accommodation (only if driving day and destination acc differs)
-  const arrivalAcc = day.driving
-    ? State.trip.accommodations.find(a =>
-        a.days.includes(day.date) &&
-        a.location.toLowerCase().includes(day.driving.to.toLowerCase())
-      )
-    : null;
-  const departureAcc = dayAcc && dayAcc !== arrivalAcc ? dayAcc : (arrivalAcc ? null : dayAcc);
+  // Night's accommodation (where you sleep)
+  const dayAcc = getEffectiveAcc(day.date);
+  // On driving days show departure location as prev day's acc, arrival as tonight's
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const departureAcc = day.driving && prevDate ? getEffectiveAcc(prevDate) : null;
+  const arrivalAcc   = day.driving ? dayAcc : null;
 
   const accCardHtml = (acc, label) => {
     if (!acc) return '';
@@ -1173,14 +1211,31 @@ function renderDayPlanContent(dayIndex) {
     const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
     return `
     <div class="acc-card">
-      <div class="acc-icon">🏨</div>
+      <div class="acc-icon">${acc.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
         <div class="acc-name">${label ? `<span class="text-xs text-secondary">${label} — </span>` : ''}${esc(displayName)}</div>
         <div class="acc-note">${esc(displayNotes)}${priceStr}</div>
       </div>
-      <button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${acc.id}')" title="Edit accommodation">✏️</button>
+      ${!acc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${acc.id}')" title="Edit accommodation">✏️</button>` : ''}
     </div>`;
   };
+
+  // Acc picker for tonight (shown at bottom of plan)
+  const accs = State.trip.accommodations.filter(a => !a.isHome);
+  const todayAccId = dayAcc?.id || '';
+  const accPickerHtml = `
+    <div class="acc-picker-row">
+      <span class="acc-picker-label">🏨 Tonight:</span>
+      <select class="acc-picker-select" onchange="App.setDayAcc('${day.date}', this.value)">
+        <option value="">— none —</option>
+        ${accs.map(a => {
+          const edit = State.accEdits[a.id] || {};
+          const name = edit.name || a.name;
+          return `<option value="${a.id}"${a.id === todayAccId ? ' selected' : ''}>${esc(name)}</option>`;
+        }).join('')}
+      </select>
+      ${dayAcc && !dayAcc.isHome ? `<button class="btn-icon btn-edit-sm" onclick="App.openAccEditModal('${dayAcc.id}')" title="Edit">✏️</button>` : ''}
+    </div>`;
 
   // Build POI cards
   const poiCardsHtml = plan.length === 0
@@ -1212,11 +1267,12 @@ function renderDayPlanContent(dayIndex) {
 
     <div class="poi-list-section">
       <div class="section-label">Today's Plan</div>
-      ${accCardHtml(departureAcc, day.driving ? 'Depart' : null)}
+      ${accCardHtml(departureAcc, 'Depart')}
       <div class="poi-list" data-day="${dayIndex}">
         ${poiCardsHtml}
       </div>
-      ${accCardHtml(arrivalAcc, day.driving ? 'Arrive' : null)}
+      ${accCardHtml(arrivalAcc, 'Arrive')}
+      ${accPickerHtml}
     </div>
 
     <div class="add-more-section">
@@ -1304,6 +1360,7 @@ function buildPoiCardHtml(poiId, idx) {
       <div class="poi-card-meta">
         ${getCostHtml(poi)}
         <span class="badge badge-duration">⏱ ${poi.duration}h</span>
+        ${poi.confirmedBooking && poi.bookingTime ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || 'Booked')}">🕐 ${esc(poi.bookingTime)}</span>` : poi.confirmedBooking ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || '')}">✅ Booked</span>` : ''}
         ${badges.join('')}
       </div>
       <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
@@ -1962,6 +2019,30 @@ function closeImportModal() {
   if (modal) modal.classList.add('hidden');
 }
 
+// ─── Day Accommodation & Transport ─────────────────────────────
+function setDayAcc(date, accId) {
+  if (accId) State.dayAccAssignments[date] = accId;
+  else delete State.dayAccAssignments[date];
+  Storage.save();
+  renderAll();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+}
+
+function setTransportType(date, type) {
+  if (!State.dayTransport[date]) State.dayTransport[date] = {};
+  State.dayTransport[date].type = type;
+  Storage.save();
+  renderAll();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+}
+
+function setTransportCost(date, value) {
+  if (!State.dayTransport[date]) State.dayTransport[date] = {};
+  State.dayTransport[date].costPerPerson = parseFloat(value) || 0;
+  Storage.save();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+}
+
 // ─── Accommodation Edit Modal ───────────────────────────────────
 function openAccEditModal(accId) {
   const acc = State.trip?.accommodations.find(a => a.id === accId);
@@ -2073,6 +2154,14 @@ function findNearestDestination(lat, lng) {
     if (d < minDist) { minDist = d; nearest = acc; }
   });
   return nearest;
+}
+
+// Returns the effective accommodation for a date (user override → trip data → null)
+function getEffectiveAcc(date) {
+  if (!State.trip) return null;
+  const override = State.dayAccAssignments[date];
+  if (override) return State.trip.accommodations.find(a => a.id === override) || null;
+  return State.trip.accommodations.find(a => a.days.includes(date)) || null;
 }
 
 // Returns effective lat/lng for an accommodation, respecting any user edits
@@ -2262,7 +2351,7 @@ function searchPois(inputEl, dayIndex) {
 
 async function nominatimSearch(query, dayIndex) {
   const day = getDay(dayIndex);
-  const acc = State.trip?.accommodations.find(a => a.days.includes(day?.date));
+  const acc = getEffectiveAcc(day?.date);
   const { lat, lng } = acc ? getAccCoords(acc) : {};
   const delta = 1.2; // ~130 km radius
   try {
@@ -2412,8 +2501,8 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
 
 async function discoverNearby(dayIndex) {
   const day = getDay(dayIndex);
-  const acc = State.trip?.accommodations.find(a => a.days.includes(day?.date));
-  if (!acc?.lat && !acc?.lng) { showToast('No coordinates for this day\'s accommodation'); return; }
+  const acc = getEffectiveAcc(day?.date);
+  if (!acc) { showToast('No accommodation set for this day'); return; }
   document.querySelectorAll('.nearby-discover-results').forEach(el => {
     el.innerHTML = '<div class="discover-loading">🔍 Searching nearby…</div>';
   });
@@ -2541,6 +2630,22 @@ function openPoiEditModal(poiId) {
           <input id="pe-notes" type="text" class="settings-input"
             value="${esc((poi.description || '').slice(0, 200))}" placeholder="Any notes…">
         </div>
+        <div class="settings-field">
+          <label class="settings-label">Booking</label>
+          <div class="pe-booking-row">
+            <label class="pe-cost-toggle">
+              <input type="checkbox" id="pe-booked" ${poi.confirmedBooking ? 'checked' : ''}
+                onchange="document.getElementById('pe-booking-details').style.display=this.checked?'flex':'none'">
+              Booked
+            </label>
+            <div id="pe-booking-details" style="display:${poi.confirmedBooking ? 'flex' : 'none'};align-items:center;gap:8px;flex-wrap:wrap;">
+              <input id="pe-booking-time" type="time" class="settings-input" style="width:110px"
+                value="${esc(poi.bookingTime || '')}" title="Booking / visit time">
+              <input id="pe-booking-ref" type="text" class="settings-input" style="flex:1;min-width:100px"
+                value="${esc(poi.bookingRef || '')}" placeholder="Reference / confirmation #">
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="modal-btn modal-btn-cancel"
@@ -2579,6 +2684,10 @@ function savePoiEdit(poiId) {
   poi.costAmount = costAmt;
   poi.cost = costAmt > 0 ? costAmt : 'free';
   poi.costLabel = costAmt > 0 ? `€${costAmt % 1 === 0 ? costAmt : costAmt.toFixed(1)} pp` : 'Free';
+  const booked = document.getElementById('pe-booked')?.checked ?? poi.confirmedBooking;
+  poi.confirmedBooking = booked;
+  poi.bookingTime = booked ? (document.getElementById('pe-booking-time')?.value || '') : '';
+  poi.bookingRef  = booked ? (document.getElementById('pe-booking-ref')?.value.trim() || '') : '';
   if (['imported', 'custom', 'discovered'].includes(poi.source)) Storage.saveImported(State.trip.id);
   document.getElementById('poi-edit-modal')?.classList.add('hidden');
   placeMarkers(); renderAll();
@@ -2939,10 +3048,14 @@ function loadTrip(tripId) {
       saved.selectedDayIndex ?? 0,
       trip.days.length - 1
     );
+    State.dayAccAssignments = saved.dayAccAssignments ?? {};
+    State.dayTransport = saved.dayTransport ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
     State.selectedDayIndex = 0;
+    State.dayAccAssignments = {};
+    State.dayTransport = {};
   }
 
   // Load party config and settings
@@ -3095,8 +3208,6 @@ function injectModals() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="ae-acc-id">
-        <input type="hidden" id="ae-lat">
-        <input type="hidden" id="ae-lng">
         <div class="settings-field">
           <label class="settings-label">Search for hotel / accommodation</label>
           <input type="text" id="ae-search" class="settings-input" placeholder="🔍 Type to search…"
@@ -3116,6 +3227,14 @@ function injectModals() {
           <label class="settings-label">Price per night (€)</label>
           <input type="number" id="ae-price" class="settings-input" min="0" step="1" placeholder="0">
           <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Added to each night's total cost</div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Coordinates (lat, lng)</label>
+          <div style="display:flex;gap:8px;">
+            <input type="number" id="ae-lat" class="settings-input" step="0.0001" placeholder="lat" style="flex:1">
+            <input type="number" id="ae-lng" class="settings-input" step="0.0001" placeholder="lng" style="flex:1">
+          </div>
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Updates map pin and all distance calculations</div>
         </div>
       </div>
       <div class="modal-actions">
@@ -3185,6 +3304,8 @@ function buildSharePayload() {
     tripId: State.trip.id,
     plan: State.plan,
     accEdits: State.accEdits,
+    dayAccAssignments: State.dayAccAssignments,
+    dayTransport: State.dayTransport,
     importedPois: State.importedPois,
   };
 }
@@ -3284,7 +3405,10 @@ function loadSharedPlan() {
   loadTrip(data.tripId);
   // Apply after loadTrip initialises state
   requestAnimationFrame(() => {
-    if (data.plan) { State.plan = data.plan; Storage.save(); }
+    if (data.plan) State.plan = data.plan;
+    if (data.dayAccAssignments) State.dayAccAssignments = data.dayAccAssignments;
+    if (data.dayTransport) State.dayTransport = data.dayTransport;
+    Storage.save();
     if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
     if (data.importedPois?.length) {
       State.importedPois = data.importedPois;
@@ -3436,6 +3560,9 @@ window.App = {
   openPoiEditModal,
   pePreviewIcon,
   savePoiEdit,
+  setDayAcc,
+  setTransportType,
+  setTransportCost,
   openAccEditModal,
   closeAccEditModal,
   saveAccEdit,

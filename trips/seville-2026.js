@@ -13,21 +13,22 @@ window.registerTrip({
 
   accommodations: [
     {
+      id: 'acc-lisbon',
+      name: 'Home — Lisbon',
+      location: 'Lisbon, Portugal',
+      lat: 38.7169,
+      lng: -9.1399,
+      days: [],
+      notes: 'Trip origin & return',
+      isHome: true
+    },
+    {
       id: 'acc-mertola',
       name: 'Accommodation Mértola',
       location: 'Mértola, Portugal',
       lat: 37.6375,
       lng: -7.6615,
       days: ['2026-04-03', '2026-04-04', '2026-04-05'],
-      notes: 'City center'
-    },
-    {
-      id: 'acc-aracena',
-      name: 'Accommodation Aracena',
-      location: 'Aracena, Spain',
-      lat: 37.8862,
-      lng: -6.5534,
-      days: ['2026-04-05'],
       notes: 'City center'
     },
     {
@@ -53,11 +54,17 @@ window.registerTrip({
   days: [
     {
       date: '2026-04-03',
-      label: 'Arrive Mértola',
+      label: 'Lisbon → Mértola',
       destination: 'Mértola',
       emoji: '🇵🇹',
       country: 'Portugal',
-      driving: null
+      driving: {
+        from: 'Lisbon',
+        to: 'Mértola',
+        approxKm: 280,
+        approxMin: 180,
+        note: 'Drive south from Lisbon along the A2/IP2'
+      }
     },
     {
       date: '2026-04-04',
@@ -129,11 +136,17 @@ window.registerTrip({
     },
     {
       date: '2026-04-11',
-      label: 'Monte Gordo',
-      destination: 'Monte Gordo',
+      label: 'Monte Gordo → Lisbon',
+      destination: 'Lisbon',
       emoji: '🏖️',
       country: 'Portugal',
-      driving: null
+      driving: {
+        from: 'Monte Gordo',
+        to: 'Lisbon',
+        approxKm: 270,
+        approxMin: 165,
+        note: 'Return drive home via A22/A2'
+      }
     }
   ],
 
