@@ -2133,7 +2133,7 @@ function addNewAccommodation(forDate) {
     Storage.save();
   }
   renderAll();
-  openAccEditModal(id);
+  openAccEditModal(id, true);
 }
 
 function setTransportType(date, type) {
@@ -2152,9 +2152,12 @@ function setTransportCost(date, value) {
 }
 
 // ─── Accommodation Edit Modal ───────────────────────────────────
-function openAccEditModal(accId) {
+let _pendingNewAccId = null; // tracks unsaved new acc to revert on cancel
+
+function openAccEditModal(accId, isNew) {
   const acc = State.trip?.accommodations.find(a => a.id === accId);
   if (!acc) return;
+  _pendingNewAccId = isNew ? accId : null;
   const edit = State.accEdits[accId] || {};
   const { lat, lng } = getAccCoords(acc);
   document.getElementById('ae-acc-id').value = accId;
@@ -2172,11 +2175,51 @@ function openAccEditModal(accId) {
   } else {
     badge.style.display = 'none';
   }
+  // Show search only for new accommodations
+  document.getElementById('ae-search-field').style.display = isNew ? '' : 'none';
+  // Show delete only for user-created (non-bundled) accommodations
+  document.getElementById('ae-delete-btn').style.display = acc.isUserCreated ? '' : 'none';
   document.getElementById('acc-edit-modal').classList.remove('hidden');
 }
 
 function closeAccEditModal() {
+  // If there's a pending unsaved new acc, revert it
+  if (_pendingNewAccId) {
+    const idx = State.trip?.accommodations.findIndex(a => a.id === _pendingNewAccId);
+    if (idx >= 0) State.trip.accommodations.splice(idx, 1);
+    // Revert any day assignment pointing to it
+    for (const [date, id] of Object.entries(State.dayAccAssignments)) {
+      if (id === _pendingNewAccId) delete State.dayAccAssignments[date];
+    }
+    Storage.save();
+    Storage.saveUserAccs(State.trip.id);
+    _pendingNewAccId = null;
+    renderAll();
+  }
   document.getElementById('acc-edit-modal').classList.add('hidden');
+}
+
+function deleteAccommodation() {
+  const accId = document.getElementById('ae-acc-id').value;
+  if (!accId) return;
+  const acc = State.trip?.accommodations.find(a => a.id === accId);
+  if (!acc?.isUserCreated) return;
+  // Remove from trip
+  State.trip.accommodations = State.trip.accommodations.filter(a => a.id !== accId);
+  // Remove any day assignments pointing to it
+  for (const [date, id] of Object.entries(State.dayAccAssignments)) {
+    if (id === accId) delete State.dayAccAssignments[date];
+  }
+  // Remove edits
+  delete State.accEdits[accId];
+  Storage.save();
+  Storage.saveAccEdits(State.trip.id);
+  Storage.saveUserAccs(State.trip.id);
+  _pendingNewAccId = null;
+  document.getElementById('acc-edit-modal').classList.add('hidden');
+  placeMarkers();
+  renderAll();
+  showToast('Accommodation deleted');
 }
 
 let _aeSearchTimer = null;
@@ -2231,6 +2274,7 @@ function selectAccLocation(lat, lng, name, addr) {
 function saveAccEdit() {
   const accId = document.getElementById('ae-acc-id').value;
   if (!accId) return;
+  _pendingNewAccId = null; // saved — don't revert on close
   const lat = parseFloat(document.getElementById('ae-lat').value);
   const lng = parseFloat(document.getElementById('ae-lng').value);
   const acc = State.trip?.accommodations.find(a => a.id === accId);
@@ -3342,7 +3386,7 @@ function injectModals() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="ae-acc-id">
-        <div class="settings-field">
+        <div class="settings-field" id="ae-search-field" style="display:none">
           <label class="settings-label">Search for hotel / accommodation</label>
           <input type="text" id="ae-search" class="settings-input" placeholder="🔍 Type to search…"
             oninput="App.accLocationSearch(this)">
@@ -3372,6 +3416,8 @@ function injectModals() {
         </div>
       </div>
       <div class="modal-actions">
+        <button class="modal-btn" id="ae-delete-btn" style="display:none;background:#e74c3c;color:white;margin-right:auto;"
+          onclick="App.deleteAccommodation()">🗑️ Delete</button>
         <button class="modal-btn modal-btn-cancel" onclick="App.closeAccEditModal()">Cancel</button>
         <button class="modal-btn modal-btn-save" onclick="App.saveAccEdit()">Save</button>
       </div>
@@ -3702,6 +3748,7 @@ window.App = {
   openAccEditModal,
   closeAccEditModal,
   saveAccEdit,
+  deleteAccommodation,
   accLocationSearch,
   selectAccLocation,
   exportPlan,
