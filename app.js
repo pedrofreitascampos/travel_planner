@@ -1562,6 +1562,12 @@ function buildPoiCardHtml(poiId, idx) {
     <div class="poi-actions">
       <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${poiId}')" title="Edit">✏️</button>
       <button class="btn-icon btn-detail" onclick="App.openDetail('${poiId}')" title="Details">ℹ</button>
+      <select class="btn-move-day" onchange="App.movePoiToDay('${poiId}', this.value); this.selectedIndex=0;" title="Move to another day">
+        <option value="">↷</option>
+        ${State.trip.days.map((d, i) => i === State.selectedDayIndex ? '' :
+          `<option value="${d.date}">${formatShortDate(d.date)}</option>`
+        ).join('')}
+      </select>
       ${isBooked ? '' : `<button class="btn-icon btn-remove" onclick="App.removePoi('${poiId}')" title="Remove">✕</button>`}
     </div>
   </div>`;
@@ -1730,6 +1736,24 @@ function removePoi(poiId) {
   State.plan[day.date] = (State.plan[day.date] || []).filter(id => id !== poiId);
   Storage.save();
   showToast(`Removed: ${poi.name}`);
+  refreshDay(State.selectedDayIndex, true);
+}
+
+function movePoiToDay(poiId, targetDate) {
+  if (!targetDate || !State.trip) return;
+  const poi = getPoi(poiId);
+  if (!poi) return;
+  // Remove from current day
+  const currentDay = getDay(State.selectedDayIndex);
+  if (currentDay) {
+    State.plan[currentDay.date] = (State.plan[currentDay.date] || []).filter(id => id !== poiId);
+  }
+  // Add to target day
+  if (!State.plan[targetDate]) State.plan[targetDate] = [];
+  if (!State.plan[targetDate].includes(poiId)) State.plan[targetDate].push(poiId);
+  Storage.save();
+  const targetDay = State.trip.days.find(d => d.date === targetDate);
+  showToast(`Moved "${poi.name}" to ${formatShortDate(targetDate)}`);
   refreshDay(State.selectedDayIndex, true);
 }
 
@@ -3877,6 +3901,7 @@ window.App = {
   togglePoiInPlan,
   addPoi,
   removePoi,
+  movePoiToDay,
   toggleAddMore,
   toggleLayer,
   toggleCategory,
