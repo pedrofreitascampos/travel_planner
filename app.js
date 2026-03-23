@@ -6,10 +6,13 @@
 'use strict';
 
 // ─── Trip Registry ─────────────────────────────────────────────
-const tripRegistry = [];
+// window._tripRegistry is pre-seeded in index.html before trip data files load.
+// We alias it here so the rest of app.js can use tripRegistry directly.
+const tripRegistry = window._tripRegistry || [];
 
+// Keep registerTrip in sync (for any late registrations, though normally not needed)
 window.registerTrip = function(tripData) {
-  tripRegistry.push(tripData);
+  if (!tripRegistry.includes(tripData)) tripRegistry.push(tripData);
 };
 
 // ─── Category Configuration ────────────────────────────────────
@@ -88,11 +91,21 @@ const State = {
   map: null,
   lastRouteResult: null,
   isMobile: false,
+  partyConfig: [35, 38, 3, 6],
+  settings: {
+    fuelPrice: 1.70,
+    carConsumption: 7.5,
+    dailyMealBudget: 22,
+  },
+  importedPois: [],       // POIs imported from Google Maps
 };
 
 // ─── Persistence (localStorage) ────────────────────────────────
 const Storage = {
   key: tripId => `tripcraft_${tripId}`,
+  partyKey: 'tripcraft_party',
+  settingsKey: 'tripcraft_settings',
+  importKey: tripId => `tripcraft_${tripId}_imported`,
   save() {
     if (!State.trip) return;
     try {
@@ -103,11 +116,44 @@ const Storage = {
       }));
     } catch (e) { /* quota exceeded — ignore */ }
   },
+  saveParty() {
+    try {
+      localStorage.setItem(Storage.partyKey, JSON.stringify(State.partyConfig));
+    } catch (e) {}
+  },
+  saveSettings() {
+    try {
+      localStorage.setItem(Storage.settingsKey, JSON.stringify(State.settings));
+    } catch (e) {}
+  },
+  saveImported(tripId) {
+    try {
+      localStorage.setItem(Storage.importKey(tripId), JSON.stringify(State.importedPois));
+    } catch (e) {}
+  },
   load(tripId) {
     try {
       const raw = localStorage.getItem(Storage.key(tripId));
       return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
+  },
+  loadParty() {
+    try {
+      const raw = localStorage.getItem(Storage.partyKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+  loadSettings() {
+    try {
+      const raw = localStorage.getItem(Storage.settingsKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+  loadImported(tripId) {
+    try {
+      const raw = localStorage.getItem(Storage.importKey(tripId));
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
   },
   clear(tripId) {
     try { localStorage.removeItem(Storage.key(tripId)); } catch (e) {}
@@ -151,6 +197,10 @@ function esc(str) {
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function slugify(str) {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 function getPoi(id) {
@@ -302,25 +352,455 @@ async function fetchRoute(waypoints, mode) {
   }
 }
 
-// ─── Tiredness Calculation ─────────────────────────────────────
-const KIDS_MULT = 1.35; // family with 3yo + 6yo
+// ─── Party Config Helpers ──────────────────────────────────────
+function getAgeMultiplier(age) {
+  if (age < 2)  return 2.0;
+  if (age < 4)  return 1.6;
+  if (age < 7)  return 1.35;
+  if (age < 12) return 1.15;
+  if (age < 16) return 1.05;
+  return 1.0;
+}
 
-function calcTiredness(poiIds, walkKm = 0) {
-  let raw = poiIds.reduce((sum, id) => {
-    const p = getPoi(id);
-    return sum + (p ? p.duration * p.energyCost : 0);
-  }, 0);
-  raw += walkKm * 2;
-  const score = raw * KIDS_MULT;
+function getMaxAgeMultiplier() {
+  if (!State.partyConfig || State.partyConfig.length === 0) return 1.0;
+  return Math.max(...State.partyConfig.map(age => getAgeMultiplier(age)));
+}
 
-  let level, cls;
-  if      (score <  5) { level = 'Easy';        cls = 'easy';        }
-  else if (score < 10) { level = 'Comfortable'; cls = 'comfortable'; }
-  else if (score < 15) { level = 'Moderate';    cls = 'moderate';    }
-  else if (score < 20) { level = 'Tiring';      cls = 'tiring';      }
-  else                 { level = 'Exhausting';  cls = 'exhausting';  }
+function parsePartyDescription(ages) {
+  const adults  = ages.filter(a => a >= 16).length;
+  const children = ages.filter(a => a >= 4 && a < 16).length;
+  const toddlers = ages.filter(a => a >= 2 && a < 4).length;
+  const infants  = ages.filter(a => a < 2).length;
+  const parts = [];
+  if (adults  > 0) parts.push(`${adults} adult${adults > 1 ? 's' : ''}`);
+  if (children > 0) parts.push(`${children} child${children > 1 ? 'ren' : ''}`);
+  if (toddlers > 0) parts.push(`${toddlers} toddler${toddlers > 1 ? 's' : ''}`);
+  if (infants > 0)  parts.push(`${infants} infant${infants > 1 ? 's' : ''}`);
+  return parts.join(', ');
+}
 
-  return { score, level, cls, pct: Math.min((score / 25) * 100, 100) };
+function hasKidsInParty() {
+  return State.partyConfig.some(a => a < 16);
+}
+
+function getYoungestAge() {
+  if (!State.partyConfig || State.partyConfig.length === 0) return 99;
+  return Math.min(...State.partyConfig);
+}
+
+// ─── Day Metrics Calculation ────────────────────────────────────
+function calcDayMetrics(dayIndex, routeDistKm) {
+  const day = getDay(dayIndex);
+  if (!day) return null;
+  const plan = State.plan[day.date] || [];
+  const pois = plan.map(id => getPoi(id)).filter(Boolean);
+  const partySize = State.partyConfig.length;
+  const maxMult = getMaxAgeMultiplier();
+  const youngest = getYoungestAge();
+  const { fuelPrice, carConsumption, dailyMealBudget } = State.settings;
+  const walkKm = (routeDistKm != null && State.layers.routeMode === 'foot') ? routeDistKm : 0;
+
+  // ── Cost ──────────────────────────────────────────────────────
+  const poiEntryCost = pois.reduce((sum, p) => sum + (p.costAmount || p.cost || 0), 0) * partySize;
+  const mealsCost = dailyMealBudget * partySize;
+  let fuelCost = 0;
+  if (day.driving) {
+    const km = routeDistKm || day.driving.approxKm || 0;
+    fuelCost = (km / 100) * carConsumption * fuelPrice;
+  }
+  const totalCost = poiEntryCost + mealsCost + fuelCost;
+
+  // ── Tiredness ─────────────────────────────────────────────────
+  const tirednessRaw = pois.reduce((sum, p) => sum + (p.duration || 1) * (p.energyCost || 2), 0) + walkKm * 2;
+  const tirednessScore = tirednessRaw * maxMult;
+  const tirednessNorm = Math.min(10, tirednessScore / 3);
+  let tirednessLevel, tirednessColor;
+  if      (tirednessNorm > 7)   { tirednessLevel = 'Exhausting';  tirednessColor = '#e74c3c'; }
+  else if (tirednessNorm > 5)   { tirednessLevel = 'Tiring';      tirednessColor = '#e67e22'; }
+  else if (tirednessNorm > 3)   { tirednessLevel = 'Moderate';    tirednessColor = '#f39c12'; }
+  else if (tirednessNorm > 1.5) { tirednessLevel = 'Comfortable'; tirednessColor = '#2980b9'; }
+  else                           { tirednessLevel = 'Easy';        tirednessColor = '#27ae60'; }
+
+  // ── Family Friendly ───────────────────────────────────────────
+  let familyFriendly = 0;
+  if (pois.length > 0) {
+    const avgKids = pois.reduce((s, p) => s + (p.kidsRating || p.kidsFriendly || 3), 0) / pois.length;
+    familyFriendly = avgKids * 2; // scale 0-5 → 0-10
+  } else {
+    familyFriendly = 5;
+  }
+  const museumMonumentCount = pois.filter(p => p.category === 'museum' || p.category === 'monument').length;
+  if (youngest < 4 && pois.length > 0 && museumMonumentCount / pois.length > 0.6) {
+    familyFriendly -= 2;
+  }
+  if (day.driving && day.driving.approxMin > 120) {
+    familyFriendly -= 1.5;
+  }
+  familyFriendly = Math.max(0, Math.min(10, familyFriendly));
+
+  // ── Logistical Friction ───────────────────────────────────────
+  let logisticalFriction = 0;
+  pois.forEach(p => {
+    if ((p.tags || []).includes('book-ahead') || p.bookAhead) logisticalFriction += 2.5;
+  });
+  const confirmedBookings = State.trip?.confirmedBookings || {};
+  if (pois.some(p => confirmedBookings[p.id])) logisticalFriction += 1;
+  if (day.driving && day.driving.approxMin > 90) logisticalFriction += 3;
+  if (pois.length > 5) logisticalFriction += 1.5;
+  logisticalFriction = Math.max(0, Math.min(10, logisticalFriction));
+
+  // ── Cultural ──────────────────────────────────────────────────
+  const culturalWeights = { monument: 3, museum: 3, neighborhood: 2, cave: 2.5, nature: 1, bar: 1, food: 0.5, park: 0.5, beach: 0.5, entertainment: 0.5 };
+  let cultural = 0;
+  if (pois.length > 0) {
+    const avgCultural = pois.reduce((s, p) => s + (culturalWeights[p.category] || 1), 0) / pois.length;
+    cultural = Math.min(10, (avgCultural / 3) * 10);
+  }
+
+  // ── Gastronomic ───────────────────────────────────────────────
+  const foodPois = pois.filter(p => p.category === 'food' || p.category === 'bar');
+  let gastronomic = 0;
+  if (foodPois.length > 0) {
+    gastronomic += 2;
+    foodPois.forEach(p => {
+      const ratingMult = (p.rating || 3) * ((p.costAmount || 0) > 20 ? 1.3 : 1);
+      gastronomic += ratingMult;
+    });
+    if (pois.some(p => (p.tags || []).includes('market'))) gastronomic += 1;
+    gastronomic = Math.min(10, gastronomic / (foodPois.length + 1));
+  }
+
+  // ── Relaxation ────────────────────────────────────────────────
+  const relaxationWeights = { beach: 3.5, park: 3, nature: 2.5, neighborhood: 2, food: 2, bar: 2, monument: 1, museum: 0.5, cave: 1.5, entertainment: 1 };
+  let relaxation = 0;
+  if (pois.length > 0) {
+    const avgRelax = pois.reduce((s, p) => s + (relaxationWeights[p.category] || 1), 0) / pois.length;
+    relaxation = Math.min(10, (avgRelax / 3.5) * 10);
+    relaxation = Math.max(0, relaxation - tirednessNorm * 0.4);
+  }
+
+  // ── Fun ───────────────────────────────────────────────────────
+  const funWeights = { entertainment: 4, beach: 4, neighborhood: 2.5, food: 2.5, bar: 2.5, cave: 3, park: 2, monument: 1.5, museum: 1.5, nature: 2 };
+  let fun = 0;
+  if (pois.length > 0) {
+    const avgFun = pois.reduce((s, p) => {
+      const w = funWeights[p.category] || 1.5;
+      return s + w * ((p.rating || 3) / 5);
+    }, 0) / pois.length;
+    fun = Math.min(10, (avgFun / 4) * 10);
+    if (foodPois.length > 0) fun = Math.min(10, fun + 1);
+  }
+
+  // ── Kids Fun ──────────────────────────────────────────────────
+  const kidsFunWeights = { entertainment: 5, beach: 5, park: 4.5, cave: 4, neighborhood: 3, nature: 3, food: 2.5, bar: 1, monument: 1.5, museum: 1.5 };
+  let kidsFun = 0;
+  if (pois.length > 0) {
+    const avgKidsFun = pois.reduce((s, p) => {
+      const w = kidsFunWeights[p.category] || 2;
+      const kidsRating = p.kidsRating || p.kidsFriendly || 3;
+      return s + w * (kidsRating / 5);
+    }, 0) / pois.length;
+    kidsFun = Math.min(10, (avgKidsFun / 5) * 10);
+  }
+
+  // ── Overall ───────────────────────────────────────────────────
+  const overall = (
+    familyFriendly * 0.2 +
+    cultural * 0.15 +
+    gastronomic * 0.15 +
+    relaxation * 0.1 +
+    fun * 0.2 +
+    kidsFun * 0.2
+  );
+
+  // ── Suggestions ───────────────────────────────────────────────
+  const suggestions = [];
+
+  if (tirednessNorm > 7) {
+    // Suggest removing the most tiring POI
+    let mostTiringPoi = null;
+    let maxTiredness = 0;
+    pois.forEach(p => {
+      const t = (p.duration || 1) * (p.energyCost || 2);
+      if (t > maxTiredness && !p.confirmedBooking) { maxTiredness = t; mostTiringPoi = p; }
+    });
+    suggestions.push({
+      type: 'warning',
+      text: `Exhausting day — consider removing one activity${mostTiringPoi ? ` (e.g. ${mostTiringPoi.name})` : ''}`,
+      poiId: null,
+    });
+  }
+
+  if (kidsFun < 4 && hasKidsInParty()) {
+    const available = getPoisAvailableToAdd(dayIndex);
+    const bestKidPoi = available
+      .filter(p => p.category === 'park' || p.category === 'beach' || p.category === 'entertainment')
+      .sort((a, b) => (b.kidsRating || 3) - (a.kidsRating || 3))[0];
+    if (bestKidPoi) {
+      suggestions.push({
+        type: 'tip',
+        text: `Low kids fun — consider adding ${bestKidPoi.name}`,
+        poiId: bestKidPoi.id,
+      });
+    } else {
+      suggestions.push({ type: 'tip', text: 'Low kids fun — add parks, beaches or entertainment', poiId: null });
+    }
+  }
+
+  if (gastronomic < 3) {
+    const available = getPoisAvailableToAdd(dayIndex);
+    const foodPoi = available.find(p => p.category === 'food' || p.category === 'bar');
+    if (foodPoi) {
+      suggestions.push({ type: 'tip', text: `Add a food experience — try ${foodPoi.name}`, poiId: foodPoi.id });
+    }
+  }
+
+  if (logisticalFriction > 7) {
+    suggestions.push({ type: 'warning', text: 'Complex day — double-check all bookings and timings', poiId: null });
+  }
+
+  if (familyFriendly < 4) {
+    suggestions.push({ type: 'warning', text: 'This day is museum-heavy for young kids', poiId: null });
+  }
+
+  if (overall > 8) {
+    suggestions.push({ type: 'action', text: 'This day looks great! 🌟', poiId: null });
+  }
+
+  return {
+    cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, total: totalCost },
+    tiredness: { raw: tirednessRaw, score: tirednessScore, norm: tirednessNorm, level: tirednessLevel, color: tirednessColor },
+    familyFriendly,
+    logisticalFriction,
+    cultural,
+    gastronomic,
+    relaxation,
+    fun,
+    kidsFun,
+    overall,
+    suggestions,
+  };
+}
+
+function calcTripMetrics() {
+  if (!State.trip) return null;
+  const dayCount = State.trip.days.length;
+  const allMetrics = State.trip.days.map((_, i) => calcDayMetrics(i, null));
+
+  const totalCost = allMetrics.reduce((s, m) => s + (m ? m.cost.total : 0), 0);
+  const avg = key => allMetrics.reduce((s, m) => s + (m ? m[key] : 0), 0) / dayCount;
+
+  const avgTiredness = avg('tiredness'); // Note: we use norm
+  const avgTirednessNorm = allMetrics.reduce((s, m) => s + (m ? m.tiredness.norm : 0), 0) / dayCount;
+  const avgFamilyFriendly = avg('familyFriendly');
+  const avgLogisticalFriction = avg('logisticalFriction');
+  const avgCultural = avg('cultural');
+  const avgGastronomic = avg('gastronomic');
+  const avgRelaxation = avg('relaxation');
+  const avgFun = avg('fun');
+  const avgKidsFun = avg('kidsFun');
+  const overallTrip = avg('overall');
+
+  const suggestions = [];
+
+  if (allMetrics.some(m => m && m.tiredness.norm > 7)) {
+    suggestions.push({ type: 'warning', text: 'Consider spacing out heavy activity days' });
+  }
+  const budget = 2000;
+  if (totalCost > budget) {
+    suggestions.push({ type: 'warning', text: `Over estimated budget (€${totalCost.toFixed(0)} vs €${budget})` });
+  }
+  if (avgKidsFun < 5) {
+    suggestions.push({ type: 'tip', text: 'Low kids fun overall — add more parks and beaches' });
+  }
+  if (avgGastronomic < 4) {
+    suggestions.push({ type: 'tip', text: 'Food experiences could be richer — add local dining spots' });
+  }
+
+  let bestDayIdx = 0, worstDayIdx = 0;
+  allMetrics.forEach((m, i) => {
+    if (m && m.overall > (allMetrics[bestDayIdx]?.overall || 0)) bestDayIdx = i;
+    if (m && m.overall < (allMetrics[worstDayIdx]?.overall || 10)) worstDayIdx = i;
+  });
+
+  return {
+    allMetrics,
+    totalCost,
+    avgTirednessNorm,
+    avgFamilyFriendly,
+    avgLogisticalFriction,
+    avgCultural,
+    avgGastronomic,
+    avgRelaxation,
+    avgFun,
+    avgKidsFun,
+    overallTrip,
+    suggestions,
+    bestDayIdx,
+    worstDayIdx,
+  };
+}
+
+// ─── Radar Chart SVG ───────────────────────────────────────────
+function renderRadarChartSVG(metrics, accentColor) {
+  const axes = [
+    { label: 'Cultural',    value: metrics.cultural },
+    { label: 'Gastronomy',  value: metrics.gastronomic },
+    { label: 'Relaxation',  value: metrics.relaxation },
+    { label: 'Fun',         value: metrics.fun },
+    { label: 'Kids Fun',    value: metrics.kidsFun },
+    { label: 'Family Fit',  value: metrics.familyFriendly },
+  ];
+  const n = axes.length;
+  const cx = 100, cy = 105, r = 72;
+  const color = accentColor || '#e07b54';
+
+  function polarToXY(angleDeg, radius) {
+    const rad = (angleDeg - 90) * Math.PI / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  }
+
+  // Axis lines and labels
+  let gridLines = '';
+  let labels = '';
+  const labelOffset = 14;
+
+  // Grid rings
+  let gridRings = '';
+  [0.25, 0.5, 0.75, 1.0].forEach(scale => {
+    const pts = axes.map((_, i) => {
+      const angle = (360 / n) * i;
+      const pt = polarToXY(angle, r * scale);
+      return `${pt.x},${pt.y}`;
+    }).join(' ');
+    gridRings += `<polygon points="${pts}" fill="none" stroke="#e0e0e0" stroke-width="${scale === 1.0 ? 1.5 : 0.8}"/>`;
+  });
+
+  axes.forEach((axis, i) => {
+    const angle = (360 / n) * i;
+    const outerPt = polarToXY(angle, r);
+    const innerPt = polarToXY(angle, 0);
+    gridLines += `<line x1="${innerPt.x.toFixed(1)}" y1="${innerPt.y.toFixed(1)}" x2="${outerPt.x.toFixed(1)}" y2="${outerPt.y.toFixed(1)}" stroke="#e0e0e0" stroke-width="0.8"/>`;
+
+    const labelPt = polarToXY(angle, r + labelOffset);
+    const anchor = labelPt.x < cx - 5 ? 'end' : labelPt.x > cx + 5 ? 'start' : 'middle';
+    labels += `<text x="${labelPt.x.toFixed(1)}" y="${(labelPt.y + 3).toFixed(1)}" text-anchor="${anchor}" font-size="9" fill="#666" font-family="system-ui,sans-serif">${axis.label}</text>`;
+  });
+
+  // Data polygon
+  const dataPoints = axes.map((axis, i) => {
+    const angle = (360 / n) * i;
+    const val = Math.max(0, Math.min(10, axis.value));
+    const pt = polarToXY(angle, r * (val / 10));
+    return `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
+  }).join(' ');
+
+  // Dot at each vertex
+  let dots = '';
+  axes.forEach((axis, i) => {
+    const angle = (360 / n) * i;
+    const val = Math.max(0, Math.min(10, axis.value));
+    const pt = polarToXY(angle, r * (val / 10));
+    dots += `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="3" fill="${color}" stroke="white" stroke-width="1.5"/>`;
+  });
+
+  return `<svg viewBox="0 0 200 210" width="200" height="210" xmlns="http://www.w3.org/2000/svg">
+    ${gridRings}
+    ${gridLines}
+    <polygon points="${dataPoints}" fill="${color}" fill-opacity="0.25" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+    ${dots}
+    ${labels}
+  </svg>`;
+}
+
+// ─── Metric Bar HTML ───────────────────────────────────────────
+function renderMetricBar(icon, label, value, inverted) {
+  const displayVal = inverted ? value : value;
+  const pct = Math.max(0, Math.min(100, displayVal * 10));
+  let color;
+  if      (displayVal >= 7)  color = '#27ae60';
+  else if (displayVal >= 5)  color = '#2980b9';
+  else if (displayVal >= 3)  color = '#f39c12';
+  else                        color = '#e74c3c';
+  return `<div class="metric-bar-row">
+    <span class="metric-bar-icon">${icon}</span>
+    <span class="metric-bar-label">${label}</span>
+    <div class="metric-bar-track">
+      <div class="metric-bar-fill" style="width:${pct.toFixed(1)}%;background:${color};"></div>
+    </div>
+    <span class="metric-bar-score">${displayVal.toFixed(1)}</span>
+  </div>`;
+}
+
+// ─── Day Metrics UI ────────────────────────────────────────────
+function renderDayMetricsUI(dayIndex, routeDistKm) {
+  const metrics = calcDayMetrics(dayIndex, routeDistKm);
+  if (!metrics) return;
+
+  const tirednessLevelClass = metrics.tiredness.level.toLowerCase();
+  const accentColor = getDayColor(dayIndex);
+
+  const fuelHtml = metrics.cost.fuel > 0
+    ? `<div class="cost-item"><span class="cost-item-label">Fuel</span><span class="cost-item-value">€${metrics.cost.fuel.toFixed(0)}</span></div>`
+    : '';
+
+  const suggestionsHtml = metrics.suggestions.length > 0
+    ? `<div class="suggestions-list">${metrics.suggestions.map(s => {
+        const typeIcon = s.type === 'warning' ? '⚠️' : s.type === 'tip' ? '💡' : '✅';
+        const addBtn = s.poiId ? ` <button class="suggestion-add-btn" onclick="App.addPoi('${s.poiId}')">Add</button>` : '';
+        return `<div class="suggestion suggestion-${s.type}">${typeIcon} ${esc(s.text)}${addBtn}</div>`;
+      }).join('')}</div>`
+    : '';
+
+  const partyDesc = parsePartyDescription(State.partyConfig);
+  const kidsAges = State.partyConfig.filter(a => a < 16);
+  const kidsStr = kidsAges.length > 0 ? ` (ages ${kidsAges.join(', ')})` : '';
+
+  const html = `
+    <div class="metrics-row-main">
+      <div class="metric-pill cost-pill">💰 €${metrics.cost.total.toFixed(0)}</div>
+      <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}">😓 ${metrics.tiredness.level}</div>
+      <div class="metric-pill overall-pill">⭐ ${metrics.overall.toFixed(1)}/10</div>
+    </div>
+    <div class="party-info-line">
+      👨‍👩‍👧‍👦 ${esc(partyDesc)}${esc(kidsStr)} · <a href="#" onclick="event.preventDefault();App.openSettingsModal()" class="party-settings-link">Settings</a>
+    </div>
+    <details class="metrics-details">
+      <summary>📊 Day Analysis</summary>
+      <div class="metrics-details-inner">
+        <div class="metric-section">
+          <div class="metric-section-title">💰 Estimated Cost</div>
+          <div class="cost-breakdown">
+            <div class="cost-item"><span class="cost-item-label">Entries</span><span class="cost-item-value">€${metrics.cost.poi.toFixed(0)}</span></div>
+            <div class="cost-item"><span class="cost-item-label">Meals</span><span class="cost-item-value">€${metrics.cost.meals.toFixed(0)}</span></div>
+            ${fuelHtml}
+            <div class="cost-item cost-total"><span class="cost-item-label">Total</span><span class="cost-item-value">€${metrics.cost.total.toFixed(0)}</span></div>
+          </div>
+        </div>
+        <div class="metric-section">
+          <div class="metric-section-title">📈 Day Scores</div>
+          <div class="metric-bars">
+            ${renderMetricBar('👨‍👩‍👧', 'Family Fit', metrics.familyFriendly)}
+            ${renderMetricBar('🏛️', 'Cultural', metrics.cultural)}
+            ${renderMetricBar('🍽️', 'Gastronomic', metrics.gastronomic)}
+            ${renderMetricBar('🛋️', 'Relaxation', metrics.relaxation)}
+            ${renderMetricBar('🎉', 'Fun', metrics.fun)}
+            ${renderMetricBar('🧒', 'Kids Fun', metrics.kidsFun)}
+            ${renderMetricBar('🔧', 'Logistics', 10 - metrics.logisticalFriction, true)}
+          </div>
+        </div>
+        <div class="radar-chart-container">
+          ${renderRadarChartSVG(metrics, accentColor)}
+        </div>
+        ${suggestionsHtml}
+      </div>
+    </details>
+  `;
+
+  document.querySelectorAll('.day-metrics-widget').forEach(el => {
+    el.innerHTML = html;
+  });
 }
 
 // ─── Map Setup ─────────────────────────────────────────────────
@@ -392,6 +872,7 @@ function placeMarkers() {
     // Source filter
     if (poi.source === 'user' && !State.layers.showUser) return;
     if (poi.source === 'suggested' && !State.layers.showSuggested) return;
+    if (poi.source === 'imported' && !State.layers.showUser) return;
     // Category filter
     if (!State.layers.categories[poi.category]) return;
 
@@ -452,11 +933,16 @@ async function drawRoute(dayIndex) {
   const waypoints = plan.map(id => getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
   if (waypoints.length < 2) {
     updateRouteSummaryUI(null);
+    renderDayMetricsUI(dayIndex, 0);
     return;
   }
 
   const result = await fetchRoute(waypoints, State.layers.routeMode);
-  if (!result) { updateRouteSummaryUI(null); return; }
+  if (!result) {
+    updateRouteSummaryUI(null);
+    renderDayMetricsUI(dayIndex, 0);
+    return;
+  }
   State.lastRouteResult = result;
 
   if (result.geojson) {
@@ -478,9 +964,8 @@ async function drawRoute(dayIndex) {
   }
 
   updateRouteSummaryUI(result);
-  // Update tiredness with actual walking distance
-  const walkKm = State.layers.routeMode === 'foot' ? result.distKm : 0;
-  renderTirednessUI(plan, walkKm);
+  // Update metrics with actual walking/driving distance
+  renderDayMetricsUI(dayIndex, result.distKm);
 }
 
 // ─── Weather Loading ───────────────────────────────────────────
@@ -549,22 +1034,6 @@ async function preloadAllWeather() {
     }
     await new Promise(r => setTimeout(r, 350));
   }
-}
-
-// ─── Tiredness UI ──────────────────────────────────────────────
-function renderTirednessUI(poiIds, walkKm = 0) {
-  document.querySelectorAll('.tiredness-widget').forEach(el => {
-    const { score, level, cls, pct } = calcTiredness(poiIds, walkKm);
-    el.innerHTML = `
-      <div class="tiredness-header">
-        <span class="tiredness-label">Energy Level</span>
-        <span class="tiredness-level ${cls}">${level}</span>
-      </div>
-      <div class="tiredness-bar-track">
-        <div class="tiredness-bar-fill ${cls}" style="width:${pct.toFixed(1)}%"></div>
-      </div>
-      <div class="tiredness-score">Score: ${score.toFixed(1)} · kids ×${KIDS_MULT}</div>`;
-  });
 }
 
 // ─── Route Summary UI ──────────────────────────────────────────
@@ -667,7 +1136,7 @@ function renderDayPlanContent(dayIndex) {
       ${drivingHtml}
     </div>
 
-    <div class="tiredness-widget"><!-- filled by renderTirednessUI --></div>
+    <div class="day-metrics-widget"></div>
 
     <div class="route-summary" style="display:none"></div>
 
@@ -700,14 +1169,14 @@ function renderDayPlanContent(dayIndex) {
     initTouchDrag(el.querySelector('.poi-list'), dayIndex);
   });
 
-  // Tiredness from plan (walkKm = 0 initially; updated after route loads)
-  renderTirednessUI(plan, 0);
+  // Render day metrics (walkKm = 0 initially; updated after route loads)
+  renderDayMetricsUI(dayIndex, 0);
 
   // Re-use cached route summary if available
   if (State.lastRouteResult) {
     updateRouteSummaryUI(State.lastRouteResult);
-    const walkKm = State.layers.routeMode === 'foot' ? State.lastRouteResult.distKm : 0;
-    renderTirednessUI(plan, walkKm);
+    const routeDistKm = State.lastRouteResult.distKm;
+    renderDayMetricsUI(dayIndex, routeDistKm);
   }
 
   // Load weather into all .weather-host elements (one per rendered container)
@@ -751,7 +1220,7 @@ function buildAddCardHtml(poi) {
     <div class="add-poi-icon">${cat.icon}</div>
     <div class="add-poi-info">
       <div class="add-poi-name">${esc(poi.name)}${poi.confirmedBooking ? ' ⭐' : ''}</div>
-      <div class="add-poi-meta">${poi.duration}h · ${poi.costLabel} · ${getKidsHtml(poi.kidsRating)}</div>
+      <div class="add-poi-meta">${poi.duration}h · ${poi.costLabel || 'Free'} · ${getKidsHtml(poi.kidsRating)}</div>
     </div>
     <button class="btn-add-poi" onclick="event.stopPropagation();App.addPoi('${poi.id}')">+</button>
   </div>`;
@@ -980,6 +1449,7 @@ async function openDetail(poiId) {
     poi.confirmedBooking ? '<span class="badge badge-confirmed">⭐ Confirmed</span>' : '',
     poi.bookAhead && !poi.confirmedBooking ? '<span class="badge badge-warning">⚠️ Book ahead</span>' : '',
     poi.source === 'suggested' ? '<span class="badge badge-category">💡 Suggested</span>' : '',
+    poi.source === 'imported' ? '<span class="badge badge-category">📥 Imported</span>' : '',
   ].filter(Boolean).join('');
 
   const notesHtml = poi.notes ? `
@@ -1004,13 +1474,13 @@ async function openDetail(poiId) {
       <div class="detail-badges">${badges}</div>
       <div class="detail-name">${esc(poi.name)}</div>
       <div class="detail-rating">
-        ${getStarsHtml(poi.rating)}
-        <span class="rating-count">${poi.rating} (${(poi.ratingCount ?? 0).toLocaleString()} reviews)</span>
+        ${getStarsHtml(poi.rating || 3)}
+        <span class="rating-count">${poi.rating || '?'} (${(poi.ratingCount ?? 0).toLocaleString()} reviews)</span>
       </div>
       <div class="detail-stats">
         <div class="detail-stat">
           <div class="detail-stat-icon">💰</div>
-          <div class="detail-stat-value">${poi.costLabel}</div>
+          <div class="detail-stat-value">${poi.costLabel || 'Free'}</div>
           <div class="detail-stat-label">${poi.cost > 0 ? `€${poi.cost}/person` : 'Free entry'}</div>
         </div>
         <div class="detail-stat">
@@ -1020,19 +1490,19 @@ async function openDetail(poiId) {
         </div>
         <div class="detail-stat">
           <div class="detail-stat-icon">🧒</div>
-          <div class="detail-stat-value">${poi.kidsRating}/5</div>
+          <div class="detail-stat-value">${poi.kidsRating || poi.kidsFriendly || '?'}/5</div>
           <div class="detail-stat-label">Kid-friendly</div>
         </div>
       </div>
       <div class="detail-section-title">Description</div>
-      <div class="detail-desc">${esc(poi.description)}</div>
+      <div class="detail-desc">${esc(poi.description || '')}</div>
       <div class="detail-section-title">Opening Hours</div>
       <div class="detail-hours">🕐 ${esc(poi.openingHours || 'Check locally')}</div>
       ${notesHtml}
     </div>
     <div class="detail-footer">
       ${planBtnHtml}
-      <a href="${esc(poi.gmapsUrl)}" target="_blank" rel="noopener" style="display:block;">
+      <a href="${esc(poi.gmapsUrl || '#')}" target="_blank" rel="noopener" style="display:block;">
         <button class="btn-primary maps">🗺 Open in Google Maps</button>
       </a>
     </div>`;
@@ -1222,6 +1692,272 @@ function buildBottomSheetDOM() {
   inner.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;';
 }
 
+// ─── Settings Modal ────────────────────────────────────────────
+function openSettingsModal() {
+  const modal = document.getElementById('settings-modal');
+  if (!modal) return;
+
+  const partyInput = document.getElementById('settings-party');
+  const fuelInput = document.getElementById('settings-fuel');
+  const consumptionInput = document.getElementById('settings-consumption');
+  const mealInput = document.getElementById('settings-meal');
+
+  if (partyInput) partyInput.value = State.partyConfig.join(', ');
+  if (fuelInput) fuelInput.value = State.settings.fuelPrice;
+  if (consumptionInput) consumptionInput.value = State.settings.carConsumption;
+  if (mealInput) mealInput.value = State.settings.dailyMealBudget;
+
+  updatePartyPreview();
+  modal.classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+  const modal = document.getElementById('settings-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function updatePartyPreview() {
+  const input = document.getElementById('settings-party');
+  const preview = document.getElementById('party-preview');
+  if (!input || !preview) return;
+
+  const raw = input.value;
+  const ages = raw.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 0);
+  if (ages.length === 0) {
+    preview.textContent = 'Enter valid ages separated by commas';
+    return;
+  }
+  preview.textContent = parsePartyDescription(ages);
+}
+
+function saveSettings() {
+  const partyInput = document.getElementById('settings-party');
+  const fuelInput = document.getElementById('settings-fuel');
+  const consumptionInput = document.getElementById('settings-consumption');
+  const mealInput = document.getElementById('settings-meal');
+
+  if (partyInput) {
+    const ages = partyInput.value.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 0);
+    if (ages.length > 0) State.partyConfig = ages;
+  }
+  if (fuelInput) State.settings.fuelPrice = parseFloat(fuelInput.value) || 1.70;
+  if (consumptionInput) State.settings.carConsumption = parseFloat(consumptionInput.value) || 7.5;
+  if (mealInput) State.settings.dailyMealBudget = parseFloat(mealInput.value) || 22;
+
+  Storage.saveParty();
+  Storage.saveSettings();
+  closeSettingsModal();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+  showToast('Settings saved');
+}
+
+// ─── Trip Overview Modal ───────────────────────────────────────
+function openTripOverviewModal() {
+  const modal = document.getElementById('trip-overview-modal');
+  if (!modal) return;
+
+  const tripMetrics = calcTripMetrics();
+  if (!tripMetrics) return;
+
+  const content = document.getElementById('trip-overview-content');
+  if (!content) return;
+
+  const bestDay = getDay(tripMetrics.bestDayIdx);
+  const worstDay = getDay(tripMetrics.worstDayIdx);
+  const accentColor = State.trip?.coverColor || '#e07b54';
+
+  const suggestionsHtml = tripMetrics.suggestions.length > 0
+    ? `<div class="suggestions-list">${tripMetrics.suggestions.map(s => {
+        const typeIcon = s.type === 'warning' ? '⚠️' : s.type === 'tip' ? '💡' : '✅';
+        return `<div class="suggestion suggestion-${s.type}">${typeIcon} ${esc(s.text)}</div>`;
+      }).join('')}</div>`
+    : '';
+
+  const overviewMetrics = {
+    cultural: tripMetrics.avgCultural,
+    gastronomic: tripMetrics.avgGastronomic,
+    relaxation: tripMetrics.avgRelaxation,
+    fun: tripMetrics.avgFun,
+    kidsFun: tripMetrics.avgKidsFun,
+    familyFriendly: tripMetrics.avgFamilyFriendly,
+  };
+
+  content.innerHTML = `
+    <div class="metric-section">
+      <div class="metric-section-title">💰 Total Estimated Budget</div>
+      <div class="trip-budget-total">€${tripMetrics.totalCost.toFixed(0)}</div>
+    </div>
+    <div class="metric-section">
+      <div class="metric-section-title">📈 Trip Averages</div>
+      <div class="metric-bars">
+        ${renderMetricBar('👨‍👩‍👧', 'Family Fit', tripMetrics.avgFamilyFriendly)}
+        ${renderMetricBar('🏛️', 'Cultural', tripMetrics.avgCultural)}
+        ${renderMetricBar('🍽️', 'Gastronomic', tripMetrics.avgGastronomic)}
+        ${renderMetricBar('🛋️', 'Relaxation', tripMetrics.avgRelaxation)}
+        ${renderMetricBar('🎉', 'Fun', tripMetrics.avgFun)}
+        ${renderMetricBar('🧒', 'Kids Fun', tripMetrics.avgKidsFun)}
+        ${renderMetricBar('🔧', 'Logistics', 10 - tripMetrics.avgLogisticalFriction, true)}
+      </div>
+    </div>
+    <div class="radar-chart-container">
+      ${renderRadarChartSVG(overviewMetrics, accentColor)}
+    </div>
+    <div class="metric-section">
+      <div class="metric-section-title">🏆 Highlights</div>
+      <div class="day-highlights">
+        <div class="day-highlight best">
+          <span class="day-highlight-icon">🌟</span>
+          <div>
+            <div class="day-highlight-label">Best Day</div>
+            <div class="day-highlight-name">${bestDay ? esc(bestDay.label) : '—'}</div>
+            <div class="day-highlight-score">${(tripMetrics.allMetrics[tripMetrics.bestDayIdx]?.overall || 0).toFixed(1)}/10</div>
+          </div>
+        </div>
+        <div class="day-highlight worst">
+          <span class="day-highlight-icon">📌</span>
+          <div>
+            <div class="day-highlight-label">Needs Work</div>
+            <div class="day-highlight-name">${worstDay ? esc(worstDay.label) : '—'}</div>
+            <div class="day-highlight-score">${(tripMetrics.allMetrics[tripMetrics.worstDayIdx]?.overall || 0).toFixed(1)}/10</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    ${suggestionsHtml}
+  `;
+
+  modal.classList.remove('hidden');
+}
+
+function closeTripOverviewModal() {
+  const modal = document.getElementById('trip-overview-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+// ─── Import Modal ──────────────────────────────────────────────
+function openImportModal() {
+  const modal = document.getElementById('import-modal');
+  if (!modal) return;
+  const ta = document.getElementById('import-json');
+  if (ta) ta.value = '';
+  const preview = document.getElementById('import-preview');
+  if (preview) preview.innerHTML = '';
+  modal.classList.remove('hidden');
+}
+
+function closeImportModal() {
+  const modal = document.getElementById('import-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function findNearestDestination(lat, lng) {
+  if (!State.trip) return null;
+  let nearest = null;
+  let minDist = Infinity;
+  State.trip.accommodations.forEach(acc => {
+    const d = haversineKm(lat, lng, acc.lat, acc.lng);
+    if (d < minDist) { minDist = d; nearest = acc; }
+  });
+  return nearest;
+}
+
+function importPois() {
+  const ta = document.getElementById('import-json');
+  const preview = document.getElementById('import-preview');
+  if (!ta) return;
+
+  let raw;
+  try { raw = JSON.parse(ta.value); }
+  catch (e) {
+    if (preview) preview.innerHTML = `<div class="import-error">❌ Invalid JSON: ${esc(e.message)}</div>`;
+    return;
+  }
+
+  const places = [];
+
+  // Google Takeout format
+  if (raw.type === 'FeatureCollection' && Array.isArray(raw.features)) {
+    raw.features.forEach(f => {
+      const name = f.properties?.Title || f.properties?.name || 'Unnamed';
+      const coords = f.geometry?.coordinates;
+      if (!coords || coords.length < 2) return;
+      const [lng, lat] = coords;
+      const address = f.properties?.Location?.Address || f.properties?.address || '';
+      const gmapsUrl = f.properties?.['Google Maps URL'] || f.properties?.url || '';
+      places.push({ name, lat, lng, address, gmapsUrl });
+    });
+  }
+  // Simple array format
+  else if (Array.isArray(raw)) {
+    raw.forEach(item => {
+      if (item.name && item.lat != null && item.lng != null) {
+        places.push({ name: item.name, lat: Number(item.lat), lng: Number(item.lng), address: item.address || '', gmapsUrl: item.gmapsUrl || '' });
+      }
+    });
+  }
+  else {
+    if (preview) preview.innerHTML = `<div class="import-error">❌ Unrecognized format. Expected Google Takeout FeatureCollection or array of {name, lat, lng}.</div>`;
+    return;
+  }
+
+  if (places.length === 0) {
+    if (preview) preview.innerHTML = `<div class="import-error">❌ No valid places found in the file.</div>`;
+    return;
+  }
+
+  let imported = 0;
+  places.forEach(pl => {
+    const id = `imported-${slugify(pl.name)}-${Math.floor(pl.lat * 1000)}`;
+    // Don't add duplicates
+    if (State.trip.pois.find(p => p.id === id)) return;
+
+    const nearestAcc = findNearestDestination(pl.lat, pl.lng);
+    const availableDays = nearestAcc ? nearestAcc.days : (State.trip.days.map(d => d.date));
+
+    const poi = {
+      id,
+      name: pl.name,
+      lat: pl.lat,
+      lng: pl.lng,
+      category: 'monument',
+      source: 'imported',
+      destination: nearestAcc ? nearestAcc.location : 'Unknown',
+      description: pl.address || 'Imported from Google Maps',
+      rating: null,
+      ratingCount: 0,
+      cost: 0,
+      costLabel: 'Free',
+      costAmount: 0,
+      duration: 1,
+      energyCost: 2,
+      kidsRating: 3,
+      kidsFriendly: 3,
+      gmapsUrl: pl.gmapsUrl || `https://maps.google.com/?q=${encodeURIComponent(pl.name)}`,
+      bookAhead: false,
+      confirmedBooking: false,
+      tags: ['imported'],
+      openingHours: 'Check locally',
+      availableDays,
+      notes: '',
+    };
+
+    State.trip.pois.push(poi);
+    State.importedPois.push(poi);
+    imported++;
+  });
+
+  if (imported === 0) {
+    if (preview) preview.innerHTML = `<div class="import-error">⚠️ All places were already imported.</div>`;
+    return;
+  }
+
+  Storage.saveImported(State.trip.id);
+  placeMarkers();
+  renderDayPlanContent(State.selectedDayIndex);
+  closeImportModal();
+  showToast(`Imported ${imported} place${imported !== 1 ? 's' : ''}`);
+}
+
 // ─── Trip Selector ─────────────────────────────────────────────
 function showTripSelector(trips) {
   const el = document.getElementById('trip-selector');
@@ -1266,6 +2002,22 @@ function loadTrip(tripId) {
     State.selectedDayIndex = 0;
   }
 
+  // Load party config and settings
+  const savedParty = Storage.loadParty();
+  if (savedParty && Array.isArray(savedParty)) State.partyConfig = savedParty;
+
+  const savedSettings = Storage.loadSettings();
+  if (savedSettings) Object.assign(State.settings, savedSettings);
+
+  // Load previously imported POIs
+  const importedPois = Storage.loadImported(tripId);
+  State.importedPois = importedPois;
+  importedPois.forEach(poi => {
+    if (!State.trip.pois.find(p => p.id === poi.id)) {
+      State.trip.pois.push(poi);
+    }
+  });
+
   // Header
   document.querySelector('.header-title').textContent = trip.name;
   document.querySelector('.header-subtitle').textContent = trip.subtitle ?? '';
@@ -1293,6 +2045,134 @@ function loadTrip(tripId) {
   setTimeout(preloadAllWeather, 2000);
 }
 
+// ─── Modals: inject HTML ───────────────────────────────────────
+function injectModals() {
+  const modalsHtml = `
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ Trip Settings</div>
+        <button class="modal-close-btn" onclick="App.closeSettingsModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-field">
+          <label class="settings-label">Party ages (comma-separated)</label>
+          <input type="text" id="settings-party" class="settings-input"
+            placeholder="e.g. 35, 38, 3, 6" oninput="App.updatePartyPreview()">
+          <div id="party-preview" class="settings-preview"></div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Fuel price (€/L)</label>
+          <input type="number" id="settings-fuel" class="settings-input" min="0" step="0.01" placeholder="1.70">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Car consumption (L/100km)</label>
+          <input type="number" id="settings-consumption" class="settings-input" min="0" step="0.1" placeholder="7.5">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Daily meal budget (€/person)</label>
+          <input type="number" id="settings-meal" class="settings-input" min="0" step="1" placeholder="22">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel" onclick="App.closeSettingsModal()">Cancel</button>
+        <button class="modal-btn modal-btn-save" onclick="App.saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trip Overview Modal -->
+  <div id="trip-overview-modal" class="modal-overlay hidden">
+    <div class="modal-panel modal-panel-wide">
+      <div class="modal-header">
+        <div class="modal-title">📊 Trip Overview</div>
+        <button class="modal-close-btn" onclick="App.closeTripOverviewModal()">✕</button>
+      </div>
+      <div class="modal-body" id="trip-overview-content">
+        <!-- filled dynamically -->
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel" onclick="App.closeTripOverviewModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div id="import-modal" class="modal-overlay hidden">
+    <div class="modal-panel modal-panel-wide">
+      <div class="modal-header">
+        <div class="modal-title">📥 Import Places</div>
+        <button class="modal-close-btn" onclick="App.closeImportModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="import-instructions">
+          <p><strong>From Google Maps Saved Places:</strong></p>
+          <ol>
+            <li>Go to <a href="https://takeout.google.com" target="_blank" rel="noopener">takeout.google.com</a></li>
+            <li>Select "Google Maps" → "Saved Places"</li>
+            <li>Download and extract the ZIP</li>
+            <li>Open <code>Takeout/Maps/Saved Places.json</code></li>
+            <li>Paste the JSON content below</li>
+          </ol>
+          <p style="margin-top:8px;font-size:11px;color:var(--color-text-secondary);">Also supports a simple array of <code>{"name","lat","lng","address"}</code> objects.</p>
+        </div>
+        <textarea id="import-json" class="import-textarea" placeholder="Paste Google Takeout JSON here..."></textarea>
+        <div id="import-preview"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel" onclick="App.closeImportModal()">Cancel</button>
+        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import</button>
+      </div>
+    </div>
+  </div>
+  `;
+
+  const container = document.createElement('div');
+  container.innerHTML = modalsHtml;
+  document.body.appendChild(container);
+}
+
+// ─── Header Buttons Injection ──────────────────────────────────
+function injectHeaderButtons() {
+  const header = document.getElementById('app-header');
+  if (!header) return;
+
+  // Find the reset button to insert before it
+  const resetBtn = document.getElementById('btn-reset-plan');
+
+  const btnImport = document.createElement('button');
+  btnImport.id = 'btn-import';
+  btnImport.title = 'Import places from Google Maps';
+  btnImport.textContent = '📥';
+  btnImport.onclick = () => App.openImportModal();
+  btnImport.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
+
+  const btnOverview = document.createElement('button');
+  btnOverview.id = 'btn-trip-overview';
+  btnOverview.title = 'Trip overview & metrics';
+  btnOverview.textContent = '📊';
+  btnOverview.onclick = () => App.openTripOverviewModal();
+  btnOverview.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
+
+  const btnSettings = document.createElement('button');
+  btnSettings.id = 'btn-settings';
+  btnSettings.title = 'Trip settings';
+  btnSettings.textContent = '⚙️';
+  btnSettings.onclick = () => App.openSettingsModal();
+  btnSettings.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
+
+  if (resetBtn) {
+    header.insertBefore(btnImport, resetBtn);
+    header.insertBefore(btnOverview, resetBtn);
+    header.insertBefore(btnSettings, resetBtn);
+  } else {
+    header.appendChild(btnImport);
+    header.appendChild(btnOverview);
+    header.appendChild(btnSettings);
+  }
+}
+
 // ─── Public API ────────────────────────────────────────────────
 window.App = {
   selectDay,
@@ -1307,14 +2187,35 @@ window.App = {
   setRouteMode,
   resetPlan,
   loadTrip,
+  openSettingsModal,
+  closeSettingsModal,
+  saveSettings,
+  updatePartyPreview,
+  openTripOverviewModal,
+  closeTripOverviewModal,
+  openImportModal,
+  closeImportModal,
+  importPois,
 };
 
 // ─── Initialization ────────────────────────────────────────────
 function init() {
   State.isMobile = window.innerWidth < 768;
 
+  // Inject modals into DOM
+  injectModals();
+  // Inject header buttons
+  injectHeaderButtons();
+
   initLayerPanel();
   initBottomSheet();
+
+  // Close modals on backdrop click
+  document.addEventListener('click', e => {
+    if (e.target.classList.contains('modal-overlay')) {
+      e.target.classList.add('hidden');
+    }
+  });
 
   // Handle resize
   window.addEventListener('resize', () => {
@@ -1327,9 +2228,12 @@ function init() {
     if (State.map) State.map.invalidateSize();
   });
 
-  // Keyboard: Escape closes detail
+  // Keyboard: Escape closes detail and modals
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeDetail();
+    if (e.key === 'Escape') {
+      closeDetail();
+      document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
+    }
   });
 
   if (tripRegistry.length === 0) {
