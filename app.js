@@ -1194,27 +1194,23 @@ async function drawInterCityRoute(dayIndex) {
     return;
   }
 
-  // Driving/train/bus — use OSRM driving route
+  // Route styling per transport type
+  const routeStyles = {
+    driving: { color: '#e53935', weight: 4, opacity: 0.6, dashArray: '10,6' },
+    train:   { color: '#6a1b9a', weight: 4, opacity: 0.7, dashArray: '4,8' },
+    bus:     { color: '#e65100', weight: 3, opacity: 0.6, dashArray: '8,6' },
+  };
+  const style = routeStyles[tType] || routeStyles.driving;
+
+  // Use OSRM road route (best approximation for all ground transport)
   const result = await fetchRoute([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], 'driving');
   if (!result) return;
   State.lastInterCityResult = result;
 
   if (result.geojson) {
-    State.interCityPolyline = L.geoJSON(result.geojson, {
-      style: {
-        color: '#e53935',
-        weight: 4,
-        opacity: 0.6,
-        dashArray: '10,6',
-      },
-    }).addTo(State.map);
+    State.interCityPolyline = L.geoJSON(result.geojson, { style }).addTo(State.map);
   } else {
-    State.interCityPolyline = L.polyline([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], {
-      color: '#e53935',
-      weight: 3,
-      opacity: 0.5,
-      dashArray: '10,6',
-    }).addTo(State.map);
+    State.interCityPolyline = L.polyline([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], style).addTo(State.map);
   }
 }
 
