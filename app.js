@@ -109,6 +109,7 @@ const State = {
     routeDiscoveryRadius: 3,  // km — along-route discovery
   },
   importedPois: [],       // POIs imported from Google Maps
+  accEdits: {},           // accId → { name, notes, pricePerNight }
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -177,6 +178,14 @@ const Storage = {
   },
   saveUserTrips(trips) {
     try { localStorage.setItem('tripcraft_user_trips', JSON.stringify(trips)); } catch (e) {}
+  },
+  accEditsKey: tripId => `tripcraft_${tripId}_acc_edits`,
+  saveAccEdits(tripId) {
+    try { localStorage.setItem(Storage.accEditsKey(tripId), JSON.stringify(State.accEdits)); } catch (e) {}
+  },
+  loadAccEdits(tripId) {
+    try { return JSON.parse(localStorage.getItem(Storage.accEditsKey(tripId)) || '{}'); }
+    catch { return {}; }
   },
 };
 
@@ -429,7 +438,10 @@ function calcDayMetrics(dayIndex, routeDistKm) {
     const km = routeDistKm || day.driving.approxKm || 0;
     fuelCost = (km / 100) * carConsumption * fuelPrice;
   }
-  const totalCost = poiEntryCost + mealsCost + fuelCost;
+  const dayAcc = State.trip?.accommodations.find(a => a.days.includes(day.date));
+  const accEdit = dayAcc ? (State.accEdits[dayAcc.id] || {}) : {};
+  const accCost = parseFloat(accEdit.pricePerNight) || 0;
+  const totalCost = poiEntryCost + mealsCost + fuelCost + accCost;
 
   // ── Tiredness ─────────────────────────────────────────────────
   const tirednessRaw = pois.reduce((sum, p) => sum + (p.duration || 1) * (p.energyCost || 2), 0) + walkKm * 2;
@@ -589,7 +601,7 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   }
 
   return {
-    cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, total: totalCost },
+    cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, acc: accCost, total: totalCost },
     tiredness: { raw: tirednessRaw, score: tirednessScore, norm: tirednessNorm, level: tirednessLevel, color: tirednessColor },
     familyFriendly,
     logisticalFriction,
@@ -776,6 +788,9 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
   const fuelHtml = metrics.cost.fuel > 0
     ? `<div class="cost-item"><span class="cost-item-label">Fuel</span><span class="cost-item-value">€${metrics.cost.fuel.toFixed(0)}</span></div>`
     : '';
+  const accCostHtml = metrics.cost.acc > 0
+    ? `<div class="cost-item"><span class="cost-item-label">Accommodation</span><span class="cost-item-value">€${metrics.cost.acc.toFixed(0)}</span></div>`
+    : '';
 
   const suggestionsHtml = metrics.suggestions.length > 0
     ? `<div class="suggestions-list">${metrics.suggestions.map(s => {
@@ -791,7 +806,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
 
   const html = `
     <div class="metrics-row-main">
-      <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.fuel > 0 ? ` + fuel €${metrics.cost.fuel.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
+      <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.fuel > 0 ? ` + fuel €${metrics.cost.fuel.toFixed(0)}` : ''}${metrics.cost.acc > 0 ? ` + accommodation €${metrics.cost.acc.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
       <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}" title="Tiredness: ${metrics.tiredness.norm.toFixed(1)}/10 — based on walking distance, activity durations, and ages in your party">😓 ${metrics.tiredness.level}</div>
       <div class="metric-pill overall-pill" title="Overall day score: ${metrics.overall.toFixed(1)}/10 — weighted average of family fit, culture, food, relaxation, fun, and logistics">⭐ ${metrics.overall.toFixed(1)}/10</div>
     </div>
@@ -807,6 +822,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
             <div class="cost-item"><span class="cost-item-label">Entries</span><span class="cost-item-value">€${metrics.cost.poi.toFixed(0)}</span></div>
             <div class="cost-item"><span class="cost-item-label">Meals</span><span class="cost-item-value">€${metrics.cost.meals.toFixed(0)}</span></div>
             ${fuelHtml}
+            ${accCostHtml}
             <div class="cost-item cost-total"><span class="cost-item-label">Total</span><span class="cost-item-value">€${metrics.cost.total.toFixed(0)}</span></div>
           </div>
         </div>
@@ -1143,14 +1159,22 @@ function renderDayPlanContent(dayIndex) {
     : null;
   const departureAcc = dayAcc && dayAcc !== arrivalAcc ? dayAcc : (arrivalAcc ? null : dayAcc);
 
-  const accCardHtml = (acc, label) => acc ? `
+  const accCardHtml = (acc, label) => {
+    if (!acc) return '';
+    const edit = State.accEdits[acc.id] || {};
+    const displayName = edit.name || acc.name;
+    const displayNotes = edit.notes !== undefined ? edit.notes : (acc.notes || '');
+    const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
+    return `
     <div class="acc-card">
       <div class="acc-icon">🏨</div>
       <div class="acc-info">
-        <div class="acc-name">${label ? `<span class="text-xs text-secondary">${label} — </span>` : ''}${esc(acc.name)}</div>
-        <div class="acc-note">${esc(acc.notes || '')}</div>
+        <div class="acc-name">${label ? `<span class="text-xs text-secondary">${label} — </span>` : ''}${esc(displayName)}</div>
+        <div class="acc-note">${esc(displayNotes)}${priceStr}</div>
       </div>
-    </div>` : '';
+      <button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${acc.id}')" title="Edit accommodation">✏️</button>
+    </div>`;
+  };
 
   // Build POI cards
   const poiCardsHtml = plan.length === 0
@@ -1932,6 +1956,37 @@ function closeImportModal() {
   if (modal) modal.classList.add('hidden');
 }
 
+// ─── Accommodation Edit Modal ───────────────────────────────────
+function openAccEditModal(accId) {
+  const acc = State.trip?.accommodations.find(a => a.id === accId);
+  if (!acc) return;
+  const edit = State.accEdits[accId] || {};
+  document.getElementById('ae-acc-id').value = accId;
+  document.getElementById('ae-name').value = edit.name ?? acc.name;
+  document.getElementById('ae-notes').value = edit.notes !== undefined ? edit.notes : (acc.notes || '');
+  document.getElementById('ae-price').value = edit.pricePerNight ?? '';
+  document.getElementById('acc-edit-modal').classList.remove('hidden');
+}
+
+function closeAccEditModal() {
+  document.getElementById('acc-edit-modal').classList.add('hidden');
+}
+
+function saveAccEdit() {
+  const accId = document.getElementById('ae-acc-id').value;
+  if (!accId) return;
+  State.accEdits[accId] = {
+    name: document.getElementById('ae-name').value.trim(),
+    notes: document.getElementById('ae-notes').value.trim(),
+    pricePerNight: parseFloat(document.getElementById('ae-price').value) || 0,
+  };
+  Storage.saveAccEdits(State.trip.id);
+  closeAccEditModal();
+  renderAll();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+  showToast('Accommodation updated');
+}
+
 function findNearestDestination(lat, lng) {
   if (!State.trip) return null;
   let nearest = null;
@@ -2052,7 +2107,7 @@ function saveCustomMarker(lat, lng) {
   const id = 'custom-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now();
 
   // Find nearest destination for availableDays
-  const nearestAcc = findNearestAccommodation(lat, lng);
+  const nearestAcc = findNearestDestination(lat, lng);
   const availableDays = nearestAcc
     ? nearestAcc.days
     : (State.trip?.days.map(d => d.date) || []);
@@ -2206,7 +2261,7 @@ function addDiscoveredResult(lat, lng, name, category, dayIndex, osmTags) {
   if (!day) return;
   const t = osmTags || {};
   const id = 'disc-' + name.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,25) + '-' + Date.now();
-  const nearestAcc = findNearestAccommodation(lat, lng);
+  const nearestAcc = findNearestDestination(lat, lng);
   const descParts = [
     t.cuisine      ? `Cuisine: ${t.cuisine.replace(/_/g,' ')}` : null,
     t.opening_hours? `Hours: ${t.opening_hours}`               : null,
@@ -2786,6 +2841,9 @@ function loadTrip(tripId) {
   const savedSettings = Storage.loadSettings();
   if (savedSettings) Object.assign(State.settings, savedSettings);
 
+  // Load accommodation edits
+  State.accEdits = Storage.loadAccEdits(tripId);
+
   // Load previously imported POIs
   const importedPois = Storage.loadImported(tripId);
   State.importedPois = importedPois;
@@ -2914,6 +2972,36 @@ function injectModals() {
       </div>
     </div>
   </div>
+
+  <!-- Accommodation Edit Modal -->
+  <div id="acc-edit-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div class="modal-title">🏨 Edit Accommodation</div>
+        <button class="modal-close-btn" onclick="App.closeAccEditModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ae-acc-id">
+        <div class="settings-field">
+          <label class="settings-label">Name</label>
+          <input type="text" id="ae-name" class="settings-input" placeholder="Accommodation name">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Notes</label>
+          <input type="text" id="ae-notes" class="settings-input" placeholder="e.g. City center, breakfast included">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Price per night (€)</label>
+          <input type="number" id="ae-price" class="settings-input" min="0" step="1" placeholder="0">
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">This will be added to each night's total cost</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel" onclick="App.closeAccEditModal()">Cancel</button>
+        <button class="modal-btn modal-btn-save" onclick="App.saveAccEdit()">Save</button>
+      </div>
+    </div>
+  </div>
   `;
 
   const container = document.createElement('div');
@@ -3020,6 +3108,9 @@ window.App = {
   openPoiEditModal,
   pePreviewIcon,
   savePoiEdit,
+  openAccEditModal,
+  closeAccEditModal,
+  saveAccEdit,
 };
 
 // ─── Initialization ────────────────────────────────────────────
