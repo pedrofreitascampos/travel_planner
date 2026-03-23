@@ -469,12 +469,12 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   const tirednessRaw = pois.reduce((sum, p) => sum + (p.duration || 1) * (p.energyCost || 2), 0) + walkKm * 2;
   const tirednessScore = tirednessRaw * maxMult;
   const tirednessNorm = Math.min(10, tirednessScore / 3);
-  let tirednessLevel, tirednessColor;
-  if      (tirednessNorm > 7)   { tirednessLevel = 'Exhausting';  tirednessColor = '#e74c3c'; }
-  else if (tirednessNorm > 5)   { tirednessLevel = 'Tiring';      tirednessColor = '#e67e22'; }
-  else if (tirednessNorm > 3)   { tirednessLevel = 'Moderate';    tirednessColor = '#f39c12'; }
-  else if (tirednessNorm > 1.5) { tirednessLevel = 'Comfortable'; tirednessColor = '#2980b9'; }
-  else                           { tirednessLevel = 'Easy';        tirednessColor = '#27ae60'; }
+  let tirednessLevel, tirednessColor, tirednessEmoji;
+  if      (tirednessNorm > 7)   { tirednessLevel = 'Exhausting';  tirednessColor = '#e74c3c'; tirednessEmoji = '🥵'; }
+  else if (tirednessNorm > 5)   { tirednessLevel = 'Tiring';      tirednessColor = '#e67e22'; tirednessEmoji = '😓'; }
+  else if (tirednessNorm > 3)   { tirednessLevel = 'Moderate';    tirednessColor = '#f39c12'; tirednessEmoji = '🙂'; }
+  else if (tirednessNorm > 1.5) { tirednessLevel = 'Comfortable'; tirednessColor = '#2980b9'; tirednessEmoji = '😌'; }
+  else                           { tirednessLevel = 'Easy';        tirednessColor = '#27ae60'; tirednessEmoji = '😎'; }
 
   // ── Family Friendly ───────────────────────────────────────────
   let familyFriendly = 0;
@@ -624,7 +624,7 @@ function calcDayMetrics(dayIndex, routeDistKm) {
 
   return {
     cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, transport: transportCost, acc: accCost, total: totalCost },
-    tiredness: { raw: tirednessRaw, score: tirednessScore, norm: tirednessNorm, level: tirednessLevel, color: tirednessColor },
+    tiredness: { raw: tirednessRaw, score: tirednessScore, norm: tirednessNorm, level: tirednessLevel, color: tirednessColor, emoji: tirednessEmoji },
     familyFriendly,
     logisticalFriction,
     cultural,
@@ -829,7 +829,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
   const html = `
     <div class="metrics-row-main">
       <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.transport > 0 ? ` + transport €${metrics.cost.transport.toFixed(0)}` : ''}${metrics.cost.acc > 0 ? ` + accommodation €${metrics.cost.acc.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
-      <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}" title="Tiredness: ${metrics.tiredness.norm.toFixed(1)}/10 — based on walking distance, activity durations, and ages in your party">😓 ${metrics.tiredness.level}</div>
+      <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}" title="Tiredness: ${metrics.tiredness.norm.toFixed(1)}/10 — based on walking distance, activity durations, and ages in your party">${metrics.tiredness.emoji} ${metrics.tiredness.level}</div>
       <div class="metric-pill overall-pill" title="Overall day score: ${metrics.overall.toFixed(1)}/10 — weighted average of family fit, culture, food, relaxation, fun, and logistics">⭐ ${metrics.overall.toFixed(1)}/10</div>
     </div>
     <div class="party-info-line">
