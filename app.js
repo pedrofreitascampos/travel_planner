@@ -1149,9 +1149,36 @@ function greatCirclePoints(lat1, lng1, lat2, lng2, n) {
   return pts;
 }
 
+// Airport cache: { 'lat,lng' → { lat, lng, name, iata } | null }
+const _airportCache = {};
+
+async function findNearestAirport(lat, lng) {
+  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  if (_airportCache[key] !== undefined) return _airportCache[key];
+  try {
+    const q = `[out:json][timeout:10];node["aeroway"="aerodrome"]["iata"](around:150000,${lat},${lng});out body 3;`;
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: 'data=' + encodeURIComponent(q),
+    });
+    if (!r.ok) { _airportCache[key] = null; return null; }
+    const data = await r.json();
+    const airports = (data.elements || [])
+      .filter(e => e.tags?.iata && e.tags?.name)
+      .sort((a, b) => haversineKm(lat, lng, a.lat, a.lon) - haversineKm(lat, lng, b.lat, b.lon));
+    const best = airports[0];
+    _airportCache[key] = best ? { lat: best.lat, lng: best.lon, name: best.tags.name, iata: best.tags.iata } : null;
+    return _airportCache[key];
+  } catch { _airportCache[key] = null; return null; }
+}
+
 async function drawInterCityRoute(dayIndex) {
+  // Clear existing
   if (State.interCityPolyline) {
-    State.map.removeLayer(State.interCityPolyline);
+    if (Array.isArray(State.interCityPolyline)) {
+      State.interCityPolyline.forEach(l => State.map.removeLayer(l));
+    } else {
+      State.map.removeLayer(State.interCityPolyline);
+    }
     State.interCityPolyline = null;
   }
   State.lastInterCityResult = null;
@@ -1159,42 +1186,73 @@ async function drawInterCityRoute(dayIndex) {
   const day = getDay(dayIndex);
   if (!day || !State.map) return;
 
-  // Departure: previous night's acc, or home if first day
   const prevDate = State.trip.days[dayIndex - 1]?.date;
   let depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
-  // Arrival: tonight's acc, or home if same as departure (driving away to home)
   let arrAcc = getEffectiveAcc(day.date);
   if (arrAcc && depAcc && arrAcc.id === depAcc.id && day.driving) arrAcc = getHomeAcc();
   if (!depAcc && !arrAcc) return;
-  // If only one is missing, try home
   if (!depAcc) depAcc = getHomeAcc();
   if (!arrAcc) arrAcc = getHomeAcc();
-  // Only draw if accommodations are different (different locations)
   if (!depAcc || !arrAcc || depAcc.id === arrAcc.id) return;
 
   const depC = getAccCoords(depAcc);
   const arrC = getAccCoords(arrAcc);
 
-  // Check transport type — use great circle for flights
   const dayTransportOverride = State.dayTransport[day.date] || {};
   const tType = dayTransportOverride.type || 'driving';
 
   if (tType === 'flight') {
-    // Draw great circle arc
-    const pts = greatCirclePoints(depC.lat, depC.lng, arrC.lat, arrC.lng, 50);
-    State.interCityPolyline = L.polyline(pts, {
-      color: '#e53935',
-      weight: 3,
-      opacity: 0.7,
-      dashArray: '6,8',
-    }).addTo(State.map);
-    // Store a minimal result for discoverAlongRoute
+    // Find nearest airports to departure and arrival
+    const [depAirport, arrAirport] = await Promise.all([
+      findNearestAirport(depC.lat, depC.lng),
+      findNearestAirport(arrC.lat, arrC.lng),
+    ]);
+
+    const layers = [];
+    const depAP = depAirport || { lat: depC.lat, lng: depC.lng };
+    const arrAP = arrAirport || { lat: arrC.lat, lng: arrC.lng };
+
+    // Leg 1: acc → departure airport (road)
+    const leg1 = await fetchRoute([[depC.lat, depC.lng], [depAP.lat, depAP.lng]], 'driving');
+    if (leg1?.geojson) {
+      layers.push(L.geoJSON(leg1.geojson, {
+        style: { color: '#78909c', weight: 3, opacity: 0.6, dashArray: '6,4' },
+      }).addTo(State.map));
+    }
+
+    // Leg 2: airport → airport (GCC arc)
+    const pts = greatCirclePoints(depAP.lat, depAP.lng, arrAP.lat, arrAP.lng, 50);
+    layers.push(L.polyline(pts, {
+      color: '#e53935', weight: 3, opacity: 0.7, dashArray: '6,8',
+    }).addTo(State.map));
+
+    // Leg 3: arrival airport → acc (road)
+    const leg3 = await fetchRoute([[arrAP.lat, arrAP.lng], [arrC.lat, arrC.lng]], 'driving');
+    if (leg3?.geojson) {
+      layers.push(L.geoJSON(leg3.geojson, {
+        style: { color: '#78909c', weight: 3, opacity: 0.6, dashArray: '6,4' },
+      }).addTo(State.map));
+    }
+
+    // Add airport markers
+    if (depAirport) {
+      layers.push(L.marker([depAirport.lat, depAirport.lng], {
+        icon: L.divIcon({ html: `<div style="background:#1a1a2e;color:white;font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px;white-space:nowrap;">${depAirport.iata} ✈️</div>`, className: '', iconAnchor: [20, 10] }),
+      }).addTo(State.map));
+    }
+    if (arrAirport && arrAirport.iata !== depAirport?.iata) {
+      layers.push(L.marker([arrAirport.lat, arrAirport.lng], {
+        icon: L.divIcon({ html: `<div style="background:#1a1a2e;color:white;font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px;white-space:nowrap;">✈️ ${arrAirport.iata}</div>`, className: '', iconAnchor: [20, 10] }),
+      }).addTo(State.map));
+    }
+
+    State.interCityPolyline = layers;
     const geoCoords = pts.map(([lat, lng]) => [lng, lat]);
     State.lastInterCityResult = { geojson: { coordinates: geoCoords } };
     return;
   }
 
-  // Route styling per transport type
+  // Ground transport
   const routeStyles = {
     driving: { color: '#e53935', weight: 4, opacity: 0.6, dashArray: '10,6' },
     train:   { color: '#6a1b9a', weight: 4, opacity: 0.7, dashArray: '4,8' },
@@ -1202,7 +1260,6 @@ async function drawInterCityRoute(dayIndex) {
   };
   const style = routeStyles[tType] || routeStyles.driving;
 
-  // Use OSRM road route (best approximation for all ground transport)
   const result = await fetchRoute([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], 'driving');
   if (!result) return;
   State.lastInterCityResult = result;
@@ -1366,7 +1423,7 @@ function renderDayPlanContent(dayIndex) {
   const estSpeeds = { driving: null, flight: 800, train: 150, bus: 60 };
   let displayMin;
   if (dayTransport.durationMin) displayMin = dayTransport.durationMin;
-  else if (tType === 'flight')  displayMin = Math.ceil(km / 800 * 60) + 90;
+  else if (tType === 'flight')  displayMin = Math.ceil(km / 800 * 60) + 90 + 90; // flight + 90min airport + 2×45min commute
   else if (tType === 'driving') displayMin = day.driving?.approxMin;
   else                          displayMin = Math.ceil(km / (estSpeeds[tType] || 80) * 60);
   const costPerPersonField = tType !== 'driving' ? `
