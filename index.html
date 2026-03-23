@@ -152,20 +152,21 @@
      Order: Leaflet → Trip Registry → Trip Files → App
 ═══════════════════════════════════════════════════════════ -->
 
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<!-- Bootstrap registerTrip BEFORE trip data files load -->
+<!-- Define trip registry synchronously — MUST be before any trip data files -->
 <script>
   window._tripRegistry = [];
   window.registerTrip = function(data) { window._tripRegistry.push(data); };
 </script>
 
-<!-- Trip data -->
+<!-- Leaflet (synchronous — app.js needs it available at parse time) -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Trip data files (synchronous — populate window._tripRegistry) -->
 <script src="trips/seville-2026.js"></script>
 
-<!-- Main app logic (reads window._tripRegistry on init) -->
-<script src="app.js"></script>
+<!-- App logic: defer ensures it runs AFTER all synchronous scripts above
+     have fully executed, so window._tripRegistry is always populated -->
+<script src="app.js" defer></script>
 
 </body>
 </html>

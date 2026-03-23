@@ -6,13 +6,22 @@
 'use strict';
 
 // ─── Trip Registry ─────────────────────────────────────────────
-// window._tripRegistry is pre-seeded in index.html before trip data files load.
-// We alias it here so the rest of app.js can use tripRegistry directly.
-const tripRegistry = window._tripRegistry || [];
+// window._tripRegistry is populated by trip data files loaded before this script.
+// We use a live getter so this always reflects the populated array at call time,
+// even if the browser evaluates this module-level code at an unexpected moment.
+const tripRegistry = {
+  get _arr() { return window._tripRegistry || []; },
+  get length() { return this._arr.length; },
+  push(v) { this._arr.push(v); },
+  find(fn) { return this._arr.find(fn); },
+  map(fn) { return this._arr.map(fn); },
+  filter(fn) { return this._arr.filter(fn); },
+  [Symbol.iterator]() { return this._arr[Symbol.iterator](); },
+};
 
-// Keep registerTrip in sync (for any late registrations, though normally not needed)
 window.registerTrip = function(tripData) {
-  if (!tripRegistry.includes(tripData)) tripRegistry.push(tripData);
+  if (!window._tripRegistry) window._tripRegistry = [];
+  if (!window._tripRegistry.includes(tripData)) window._tripRegistry.push(tripData);
 };
 
 // ─── Category Configuration ────────────────────────────────────
@@ -2242,9 +2251,9 @@ function init() {
   }
 
   if (tripRegistry.length === 1) {
-    loadTrip(tripRegistry[0].id);
+    loadTrip(tripRegistry._arr[0].id);
   } else {
-    showTripSelector(tripRegistry);
+    showTripSelector(tripRegistry._arr);
   }
 }
 
