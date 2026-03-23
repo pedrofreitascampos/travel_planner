@@ -167,6 +167,13 @@ const Storage = {
   clear(tripId) {
     try { localStorage.removeItem(Storage.key(tripId)); } catch (e) {}
   },
+  loadUserTrips() {
+    try { return JSON.parse(localStorage.getItem('tripcraft_user_trips') || '[]'); }
+    catch { return []; }
+  },
+  saveUserTrips(trips) {
+    try { localStorage.setItem('tripcraft_user_trips', JSON.stringify(trips)); } catch (e) {}
+  },
 };
 
 // ─── Pure Utility Functions ────────────────────────────────────
@@ -1968,20 +1975,239 @@ function importPois() {
 }
 
 // ─── Trip Selector ─────────────────────────────────────────────
+// ─── User Trip Management ───────────────────────────────────────
+
+function deleteUserTrip(tripId) {
+  if (!confirm('Delete this trip? This cannot be undone.')) return;
+  // Remove from localStorage user trips
+  const userTrips = Storage.loadUserTrips().filter(t => t.id !== tripId);
+  Storage.saveUserTrips(userTrips);
+  // Remove from live registry
+  const idx = window._tripRegistry.findIndex(t => t.id === tripId);
+  if (idx !== -1) window._tripRegistry.splice(idx, 1);
+  // Also wipe its plan data
+  Storage.clear(tripId);
+  // If the deleted trip was active, switch to first available or show selector
+  if (State.trip?.id === tripId) {
+    State.trip = null;
+    if (tripRegistry.length > 0) {
+      loadTrip(tripRegistry._arr[0].id);
+    } else {
+      showTripSelector([]);
+    }
+  } else {
+    showTripSelector(tripRegistry._arr);
+  }
+  showToast('Trip deleted');
+}
+
+function createUserTrip(formData) {
+  // formData: { name, emoji, color, destinations: [{name, country, dateFrom, dateTo, accName}] }
+  const slug = formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const id = `user-${slug}-${Date.now()}`;
+
+  const allDays = [];
+  const accommodations = [];
+  const defaultDayPlans = {};
+
+  formData.destinations.forEach((dest, di) => {
+    const start = new Date(dest.dateFrom + 'T12:00:00');
+    const end   = new Date(dest.dateTo   + 'T12:00:00');
+    const destDays = [];
+    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      destDays.push(dateStr);
+      const isFirst = allDays.length === 0;
+      allDays.push({
+        date: dateStr,
+        label: (di === 0 && isFirst) ? `Arrive ${dest.name}` : dest.name,
+        destination: dest.name,
+        emoji: dest.emoji || '📍',
+        country: dest.country || '',
+        driving: null,
+      });
+      defaultDayPlans[dateStr] = [];
+    }
+    accommodations.push({
+      id: `acc-${di}`,
+      name: dest.accName || dest.name,
+      location: dest.country ? `${dest.name}, ${dest.country}` : dest.name,
+      lat: 0, lng: 0,
+      days: destDays,
+      notes: '',
+    });
+  });
+
+  return {
+    id,
+    name: formData.name,
+    subtitle: formData.destinations.map(d => d.name).join(' · '),
+    coverColor: formData.color || '#e07b54',
+    emoji: formData.emoji || '✈️',
+    isUserCreated: true,
+    startDate: formData.destinations[0].dateFrom,
+    endDate: formData.destinations[formData.destinations.length - 1].dateTo,
+    pois: [],
+    days: allDays,
+    accommodations,
+    confirmedBookings: {},
+    defaultDayPlans,
+  };
+}
+
+function openNewTripForm() {
+  let modal = document.getElementById('new-trip-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'new-trip-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal-panel new-trip-panel">
+      <div class="modal-header">
+        <span class="modal-title">＋ New Trip</span>
+        <button class="modal-close" onclick="App.closeNewTripForm()">×</button>
+      </div>
+
+      <div class="new-trip-form" id="ntf">
+        <div class="ntf-row">
+          <div class="ntf-field ntf-field-grow">
+            <label>Trip name</label>
+            <input id="ntf-name" type="text" placeholder="e.g. Lisbon Weekend" autocomplete="off">
+          </div>
+          <div class="ntf-field ntf-field-narrow">
+            <label>Emoji</label>
+            <input id="ntf-emoji" type="text" placeholder="✈️" maxlength="4" style="text-align:center;font-size:20px;">
+          </div>
+          <div class="ntf-field ntf-field-narrow">
+            <label>Colour</label>
+            <input id="ntf-color" type="color" value="#e07b54" style="height:38px;padding:2px 4px;">
+          </div>
+        </div>
+
+        <div class="ntf-section-label">Destinations <button class="ntf-add-dest" onclick="App.ntfAddDestination()">＋ Add</button></div>
+        <div id="ntf-destinations"></div>
+
+        <div class="ntf-actions">
+          <button class="ntf-cancel" onclick="App.closeNewTripForm()">Cancel</button>
+          <button class="ntf-create" onclick="App.ntfSubmit()">Create Trip →</button>
+        </div>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+  // Add first destination row automatically
+  ntfAddDestination();
+  document.getElementById('ntf-name')?.focus();
+}
+
+function closeNewTripForm() {
+  document.getElementById('new-trip-modal')?.classList.add('hidden');
+}
+
+function ntfAddDestination() {
+  const container = document.getElementById('ntf-destinations');
+  if (!container) return;
+  const idx = container.children.length;
+  const row = document.createElement('div');
+  row.className = 'ntf-dest-row';
+  row.innerHTML = `
+    <div class="ntf-dest-fields">
+      <input class="ntf-dest-name" type="text" placeholder="City / place name" autocomplete="off">
+      <input class="ntf-dest-country" type="text" placeholder="Country" style="max-width:120px;" autocomplete="off">
+      <input class="ntf-dest-acc" type="text" placeholder="Accommodation (optional)" autocomplete="off">
+      <input class="ntf-dest-from" type="date">
+      <input class="ntf-dest-to"   type="date">
+    </div>
+    ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-dest-row').remove()" title="Remove">×</button>` : ''}`;
+  container.appendChild(row);
+}
+
+function ntfSubmit() {
+  const name = document.getElementById('ntf-name')?.value.trim();
+  if (!name) { showToast('Please enter a trip name'); return; }
+
+  const rows = document.querySelectorAll('#ntf-destinations .ntf-dest-row');
+  if (!rows.length) { showToast('Add at least one destination'); return; }
+
+  const destinations = [];
+  let valid = true;
+  rows.forEach(row => {
+    const cityName = row.querySelector('.ntf-dest-name')?.value.trim();
+    const country  = row.querySelector('.ntf-dest-country')?.value.trim();
+    const accName  = row.querySelector('.ntf-dest-acc')?.value.trim();
+    const dateFrom = row.querySelector('.ntf-dest-from')?.value;
+    const dateTo   = row.querySelector('.ntf-dest-to')?.value;
+    if (!cityName || !dateFrom || !dateTo) { valid = false; return; }
+    if (dateTo < dateFrom) { valid = false; return; }
+    destinations.push({ name: cityName, country, accName, dateFrom, dateTo });
+  });
+
+  if (!valid) { showToast('Fill in name + dates for each destination (to ≥ from)'); return; }
+
+  const trip = createUserTrip({
+    name,
+    emoji: document.getElementById('ntf-emoji')?.value.trim() || '✈️',
+    color: document.getElementById('ntf-color')?.value || '#e07b54',
+    destinations,
+  });
+
+  // Persist
+  const userTrips = Storage.loadUserTrips();
+  userTrips.push(trip);
+  Storage.saveUserTrips(userTrips);
+  // Register live
+  window._tripRegistry.push(trip);
+
+  closeNewTripForm();
+  loadTrip(trip.id);
+  showToast(`"${trip.name}" created! Add places via the 📥 Import button.`);
+}
+
 function showTripSelector(trips) {
   const el = document.getElementById('trip-selector');
   const cards = document.getElementById('trip-cards');
   if (!el || !cards) return;
+
+  const hasActiveTrip = !!State.trip;
+
+  // Update header: show close button only when a trip is already loaded
+  const titleEl = el.querySelector('.trip-selector-title');
+  if (titleEl) {
+    titleEl.innerHTML = `✈️ My Trips ${hasActiveTrip
+      ? `<button class="ts-close-btn" onclick="App.closeTripSelector()" title="Close">×</button>`
+      : ''}`;
+  }
+
   cards.innerHTML = trips.map(t => `
-    <div class="trip-card" onclick="App.loadTrip('${t.id}')">
-      <div class="trip-card-color" style="background:${t.coverColor}20;color:${t.coverColor};font-size:28px;">✈️</div>
+    <div class="trip-card${State.trip?.id === t.id ? ' trip-card-active' : ''}"
+         onclick="App.loadTrip('${esc(t.id)}')">
+      <div class="trip-card-color" style="background:${t.coverColor}20;color:${t.coverColor};font-size:28px;">
+        ${t.emoji || '✈️'}
+      </div>
       <div class="trip-card-info">
         <div class="trip-card-name">${esc(t.name)}</div>
         <div class="trip-card-dates">${formatShortDate(t.startDate)} – ${formatShortDate(t.endDate)}</div>
-        <div class="trip-card-meta">${t.pois.length} places · ${t.days.length} days</div>
+        <div class="trip-card-meta">${t.pois?.length ?? 0} places · ${t.days?.length ?? 0} days</div>
       </div>
+      ${t.isUserCreated ? `
+        <button class="trip-card-delete" title="Delete trip"
+          onclick="event.stopPropagation(); App.deleteUserTrip('${esc(t.id)}')">×</button>
+      ` : ''}
     </div>`).join('');
+
+  // "＋ New Trip" button at the bottom
+  const newBtn = document.createElement('button');
+  newBtn.className = 'ts-new-btn';
+  newBtn.innerHTML = '＋ New Trip';
+  newBtn.onclick = () => App.openNewTripForm();
+  cards.appendChild(newBtn);
+
   el.classList.remove('hidden');
+}
+
+function closeTripSelector() {
+  document.getElementById('trip-selector')?.classList.add('hidden');
 }
 
 // ─── Trip Loading ──────────────────────────────────────────────
@@ -2147,6 +2373,14 @@ function injectHeaderButtons() {
   const header = document.getElementById('app-header');
   if (!header) return;
 
+  // Make the trip title area clickable to open trip manager
+  const titleWrap = header.querySelector('.header-title')?.parentElement;
+  if (titleWrap) {
+    titleWrap.style.cursor = 'pointer';
+    titleWrap.title = 'Manage trips';
+    titleWrap.onclick = () => showTripSelector(tripRegistry._arr);
+  }
+
   // Find the reset button to insert before it
   const resetBtn = document.getElementById('btn-reset-plan');
 
@@ -2205,6 +2439,12 @@ window.App = {
   openImportModal,
   closeImportModal,
   importPois,
+  closeTripSelector,
+  deleteUserTrip,
+  openNewTripForm,
+  closeNewTripForm,
+  ntfAddDestination,
+  ntfSubmit,
 };
 
 // ─── Initialization ────────────────────────────────────────────
@@ -2242,6 +2482,13 @@ function init() {
     if (e.key === 'Escape') {
       closeDetail();
       document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
+    }
+  });
+
+  // Merge user-created trips from localStorage into the live registry
+  Storage.loadUserTrips().forEach(t => {
+    if (!window._tripRegistry.find(x => x.id === t.id)) {
+      window._tripRegistry.push(t);
     }
   });
 

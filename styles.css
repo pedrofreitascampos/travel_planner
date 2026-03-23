@@ -1103,6 +1103,113 @@ html, body {
 .trip-card-name  { font-size: 15px; font-weight: 600; }
 .trip-card-dates { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
 .trip-card-meta  { font-size: 11px; color: var(--color-text-light); margin-top: 2px; }
+.trip-card-info  { flex: 1; min-width: 0; }
+.trip-card-active { border-color: var(--color-accent) !important; background: var(--color-accent-light, #fff5f0); }
+
+/* Delete button on user-created trip cards */
+.trip-card-delete {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-light);
+  border-radius: 50%;
+  width: 26px; height: 26px;
+  font-size: 16px; line-height: 1;
+  cursor: pointer;
+  transition: all var(--trans-fast);
+  display: flex; align-items: center; justify-content: center;
+}
+.trip-card-delete:hover { background: #fee; border-color: #f44; color: #f44; }
+
+/* Trip selector title row (with optional close button) */
+.trip-selector-title {
+  font-size: 22px; font-weight: 700; margin-bottom: 4px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ts-close-btn {
+  background: none; border: none; font-size: 24px; line-height: 1;
+  color: var(--color-text-light); cursor: pointer; padding: 0 4px;
+  margin-left: auto;
+}
+.ts-close-btn:hover { color: var(--color-text); }
+
+/* "＋ New Trip" button at the bottom of trip selector */
+.ts-new-btn {
+  width: 100%; margin-top: 8px;
+  padding: 12px; border-radius: var(--radius-md);
+  border: 2px dashed var(--color-border);
+  background: none; color: var(--color-accent);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: all var(--trans-fast);
+}
+.ts-new-btn:hover { background: var(--color-accent-light, #fff5f0); border-color: var(--color-accent); }
+
+/* ─── New Trip Form ─────────────────────────────────────────────── */
+.new-trip-panel { max-width: 560px; }
+
+.ntf-row {
+  display: flex; gap: 10px; align-items: flex-end; margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.ntf-field { display: flex; flex-direction: column; gap: 5px; }
+.ntf-field label { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.ntf-field input {
+  padding: 8px 10px; border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm); font-size: 14px;
+  transition: border-color var(--trans-fast);
+  font-family: inherit;
+}
+.ntf-field input:focus { outline: none; border-color: var(--color-accent); }
+.ntf-field-grow { flex: 1; min-width: 140px; }
+.ntf-field-narrow { width: 72px; }
+
+.ntf-section-label {
+  font-size: 12px; font-weight: 600; color: var(--color-text-secondary);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+}
+.ntf-add-dest {
+  background: none; border: 1px solid var(--color-accent);
+  color: var(--color-accent); border-radius: 20px;
+  padding: 2px 10px; font-size: 12px; cursor: pointer;
+  transition: all var(--trans-fast);
+}
+.ntf-add-dest:hover { background: var(--color-accent); color: white; }
+
+.ntf-dest-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; background: var(--color-surface, #f9f9f9);
+  padding: 10px 12px; border-radius: var(--radius-md);
+  border: 1.5px solid var(--color-border);
+}
+.ntf-dest-fields {
+  flex: 1; display: flex; flex-wrap: wrap; gap: 8px;
+}
+.ntf-dest-fields input {
+  padding: 6px 8px; border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm); font-size: 13px;
+  font-family: inherit; flex: 1; min-width: 100px;
+  transition: border-color var(--trans-fast);
+}
+.ntf-dest-fields input:focus { outline: none; border-color: var(--color-accent); }
+.ntf-dest-remove {
+  background: none; border: none; font-size: 18px; color: var(--color-text-light);
+  cursor: pointer; padding: 0 4px; flex-shrink: 0;
+}
+.ntf-dest-remove:hover { color: #f44; }
+
+.ntf-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.ntf-cancel {
+  padding: 9px 18px; border-radius: var(--radius-md); border: 1.5px solid var(--color-border);
+  background: none; font-size: 14px; cursor: pointer; font-family: inherit;
+}
+.ntf-create {
+  padding: 9px 20px; border-radius: var(--radius-md); border: none;
+  background: var(--color-accent); color: white;
+  font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: opacity var(--trans-fast);
+}
+.ntf-create:hover { opacity: 0.88; }
 
 /* ─── Toast ───────────────────────────────────────────────────── */
 #toast-container {
