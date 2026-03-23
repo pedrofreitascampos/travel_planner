@@ -97,6 +97,7 @@ const State = {
   routePolyline: null,
   interCityPolyline: null,
   lastInterCityResult: null,
+  discoveryMarkers: [],     // temporary markers for discovered places
   markers: {},            // poiId → L.Marker
   accMarkers: [],
   map: null,
@@ -1910,6 +1911,7 @@ function selectDay(index) {
   });
 
   State.lastRouteResult = null;
+  clearDiscoveryMarkers();
   renderDayPlanContent(index);
   placeMarkers();
   fitMapToDay(index);
@@ -2040,6 +2042,13 @@ function toggleLayer(key, val) {
   Storage.save();
   placeMarkers();
   if (key === 'showAllDays') fitMapToDay(State.selectedDayIndex);
+  if (key === 'showSuggested') {
+    // Show/hide discovery markers
+    State.discoveryMarkers.forEach(m => {
+      if (val) m.addTo(State.map);
+      else State.map?.removeLayer(m);
+    });
+  }
 }
 
 function toggleCategory(key, val) {
@@ -2881,7 +2890,7 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
       <div class="add-poi-name">${esc(name)} ${starHtml}</div>
       ${subtitle ? `<div class="add-poi-meta disc-subtitle">${esc(subtitle)}</div>` : ''}
       ${bits.length ? `<div class="disc-osm-tags">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
-      <div class="disc-coords">${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+      <a class="disc-gmaps-link" href="https://www.google.com/maps/search/${encodeURIComponent(name)}/@${lat},${lng},17z" target="_blank" rel="noopener" onclick="event.stopPropagation()">📍 Reviews</a>
     </div>
     <button class="btn-add-poi disc-add-btn" data-disc-key="${esc(key)}" title="Add to day">+</button>
   </div>`;
@@ -2951,12 +2960,16 @@ async function overpassQuery(lat, lng, radiusM) {
   } catch { return null; }
 }
 
+function clearDiscoveryMarkers() {
+  State.discoveryMarkers.forEach(m => State.map?.removeLayer(m));
+  State.discoveryMarkers = [];
+}
+
 function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, dayIndex) {
   const existingNames = new Set(State.trip?.pois.map(p => p.name.toLowerCase()) || []);
   const fresh = (elements || [])
     .filter(e => e.tags?.name && !existingNames.has(e.tags.name.toLowerCase()))
     .filter(e => (e.lat && e.lon) || (e.center?.lat && e.center?.lon))
-    // Sort: places with ratings/stars first, then by distance
     .sort((a, b) => {
       const ra = parseFloat(a.tags?.stars || a.tags?.['michelin:stars'] || 0);
       const rb = parseFloat(b.tags?.stars || b.tags?.['michelin:stars'] || 0);
@@ -2969,6 +2982,28 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
       return 0;
     })
     .slice(0, 20);
+
+  // Place markers on map for discovered results
+  clearDiscoveryMarkers();
+  if (State.map && State.layers.showSuggested) {
+    fresh.forEach(e => {
+      const lat = e.lat ?? e.center?.lat;
+      const lon = e.lon ?? e.center?.lon;
+      const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || '';
+      const cat = CATEGORIES[nominatimCategoryMap(type, type)] || CATEGORIES.monument;
+      const icon = L.divIcon({
+        html: `<div style="width:24px;height:24px;border-radius:50%;background:${cat.color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;opacity:0.8;">${cat.icon}</div>`,
+        className: '',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+      const m = L.marker([lat, lon], { icon })
+        .addTo(State.map)
+        .bindPopup(`<div style="padding:6px;font-size:12px;"><b>${esc(e.tags.name)}</b><br><span style="color:#666;">${esc(type)}</span></div>`, { maxWidth: 180 });
+      State.discoveryMarkers.push(m);
+    });
+  }
+
   const html = fresh.length
     ? fresh.map(e => {
         const lat = e.lat ?? e.center?.lat;
