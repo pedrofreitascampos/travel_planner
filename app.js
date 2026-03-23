@@ -188,12 +188,21 @@ const Storage = {
     try { localStorage.setItem('tripcraft_user_trips', JSON.stringify(trips)); } catch (e) {}
   },
   accEditsKey: tripId => `tripcraft_${tripId}_acc_edits`,
+  userAccsKey: tripId => `tripcraft_${tripId}_user_accs`,
   saveAccEdits(tripId) {
     try { localStorage.setItem(Storage.accEditsKey(tripId), JSON.stringify(State.accEdits)); } catch (e) {}
   },
   loadAccEdits(tripId) {
     try { return JSON.parse(localStorage.getItem(Storage.accEditsKey(tripId)) || '{}'); }
     catch { return {}; }
+  },
+  saveUserAccs(tripId) {
+    const userAccs = State.trip?.accommodations.filter(a => a.isUserCreated) || [];
+    try { localStorage.setItem(Storage.userAccsKey(tripId), JSON.stringify(userAccs)); } catch (e) {}
+  },
+  loadUserAccs(tripId) {
+    try { return JSON.parse(localStorage.getItem(Storage.userAccsKey(tripId)) || '[]'); }
+    catch { return []; }
   },
 };
 
@@ -1264,25 +1273,39 @@ function renderDayPlanContent(dayIndex) {
   const departureAcc = day.driving && prevDate ? getEffectiveAcc(prevDate) : null;
   const arrivalAcc   = day.driving ? dayAcc : null;
 
-  const accCardHtml = (acc, label) => {
-    if (!acc) return '';
-    const edit = State.accEdits[acc.id] || {};
-    const displayName = edit.name || acc.name;
-    const displayNotes = edit.notes !== undefined ? edit.notes : (acc.notes || '');
+  const allAccs = State.trip.accommodations;
+  const accSelectHtml = (selectedId, date) => {
+    const opts = allAccs.map(a => {
+      const edit = State.accEdits[a.id] || {};
+      const name = edit.name || a.name;
+      return `<option value="${a.id}"${a.id === selectedId ? ' selected' : ''}>${esc(name)}</option>`;
+    }).join('');
+    return `<select class="acc-picker-select" onchange="App.setDayAcc('${date}', this.value)">
+      <option value="">— none —</option>
+      ${opts}
+      <option value="__new__">➕ Add new…</option>
+    </select>`;
+  };
+
+  const accCardHtml = (currentAcc, label, date) => {
+    const edit = currentAcc ? (State.accEdits[currentAcc.id] || {}) : {};
     const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
+    const notes = currentAcc ? (edit.notes !== undefined ? edit.notes : (currentAcc.notes || '')) : '';
     return `
     <div class="acc-card">
-      <div class="acc-icon">${acc.isHome ? '🏠' : '🏨'}</div>
+      <div class="acc-icon">${currentAcc?.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
-        <div class="acc-name">${label ? `<span class="text-xs text-secondary">${label} — </span>` : ''}${esc(displayName)}</div>
-        <div class="acc-note">${esc(displayNotes)}${priceStr}</div>
+        <div class="acc-name"><span class="text-xs text-secondary">${esc(label)} — </span>${accSelectHtml(currentAcc?.id || '', date)}</div>
+        ${notes || priceStr ? `<div class="acc-note">${esc(notes)}${priceStr}</div>` : ''}
       </div>
-      ${!acc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${acc.id}')" title="Edit accommodation">✏️</button>` : ''}
+      ${currentAcc && !currentAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${currentAcc.id}')" title="Edit accommodation">✏️</button>` : ''}
     </div>`;
   };
 
-  // "Tonight" card — always shown (on non-driving days there's no depart/arrive)
-  const tonightAccHtml = (!day.driving && dayAcc) ? accCardHtml(dayAcc, 'Tonight') : '';
+  // On driving days: show depart (prev night) + arrive (tonight)
+  // On non-driving days: show tonight only
+  const tonightDate = day.date;
+  const tonightAccHtml = !day.driving ? accCardHtml(dayAcc, 'Tonight', tonightDate) : '';
 
   // Build POI cards
   const poiCardsHtml = plan.length === 0
@@ -1314,11 +1337,11 @@ function renderDayPlanContent(dayIndex) {
 
     <div class="poi-list-section">
       <div class="section-label">Today's Plan</div>
-      ${accCardHtml(departureAcc, 'Depart')}
+      ${day.driving && prevDate ? accCardHtml(departureAcc, 'Depart', prevDate) : ''}
       <div class="poi-list" data-day="${dayIndex}">
         ${poiCardsHtml}
       </div>
-      ${accCardHtml(arrivalAcc, 'Arrive')}
+      ${day.driving ? accCardHtml(arrivalAcc, 'Arrive', tonightDate) : ''}
       ${tonightAccHtml}
     </div>
 
@@ -2078,27 +2101,39 @@ function setDayRouteMode(date, mode) {
 }
 
 // ─── Day Accommodation & Transport ─────────────────────────────
-function toggleNightAcc(date, accId, btn) {
-  const current = getEffectiveAcc(date);
-  const isAssigned = current?.id === accId;
-  if (isAssigned) {
-    delete State.dayAccAssignments[date];
-    btn.classList.remove('active');
-  } else {
-    State.dayAccAssignments[date] = accId;
-    btn.classList.add('active');
+function setDayAcc(date, accId) {
+  if (accId === '__new__') {
+    addNewAccommodation(date);
+    return;
   }
+  if (accId) State.dayAccAssignments[date] = accId;
+  else delete State.dayAccAssignments[date];
   Storage.save();
+  placeMarkers();
   renderAll();
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
 }
 
-function setDayAcc(date, accId) {
-  if (accId) State.dayAccAssignments[date] = accId;
-  else delete State.dayAccAssignments[date];
-  Storage.save();
+function addNewAccommodation(forDate) {
+  const id = 'acc-user-' + Date.now();
+  const newAcc = {
+    id,
+    name: 'New Accommodation',
+    location: '',
+    lat: 0,
+    lng: 0,
+    days: [],
+    notes: '',
+    isUserCreated: true,
+  };
+  State.trip.accommodations.push(newAcc);
+  Storage.saveUserAccs(State.trip.id);
+  if (forDate) {
+    State.dayAccAssignments[forDate] = id;
+    Storage.save();
+  }
   renderAll();
-  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+  openAccEditModal(id);
 }
 
 function setTransportType(date, type) {
@@ -2137,19 +2172,6 @@ function openAccEditModal(accId) {
   } else {
     badge.style.display = 'none';
   }
-  // Populate nights assignment toggles
-  const nightsEl = document.getElementById('ae-nights-list');
-  if (nightsEl && State.trip) {
-    nightsEl.innerHTML = State.trip.days.map(d => {
-      const currentAcc = getEffectiveAcc(d.date);
-      const isAssigned = currentAcc?.id === accId;
-      return `<button type="button" class="ae-night-toggle${isAssigned ? ' active' : ''}"
-        onclick="App.toggleNightAcc('${d.date}', '${accId}', this)">
-        ${formatShortDate(d.date)}
-      </button>`;
-    }).join('');
-  }
-
   document.getElementById('acc-edit-modal').classList.remove('hidden');
 }
 
@@ -2223,6 +2245,7 @@ function saveAccEdit() {
     ...(State._aePendingLabel?.[accId] ? { locationLabel: State._aePendingLabel[accId] } : {}),
   };
   Storage.saveAccEdits(State.trip.id);
+  Storage.saveUserAccs(State.trip.id);
   closeAccEditModal();
   placeMarkers();
   renderAll();
@@ -3170,8 +3193,14 @@ function loadTrip(tripId) {
   const savedSettings = Storage.loadSettings();
   if (savedSettings) Object.assign(State.settings, savedSettings);
 
-  // Load accommodation edits
+  // Load accommodation edits + user-created accommodations
   State.accEdits = Storage.loadAccEdits(tripId);
+  const userAccs = Storage.loadUserAccs(tripId);
+  userAccs.forEach(acc => {
+    if (!State.trip.accommodations.find(a => a.id === acc.id)) {
+      State.trip.accommodations.push(acc);
+    }
+  });
 
   // Load previously imported POIs
   const importedPois = Storage.loadImported(tripId);
@@ -3313,10 +3342,6 @@ function injectModals() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="ae-acc-id">
-        <div class="settings-field">
-          <label class="settings-label">Assign to nights</label>
-          <div id="ae-nights-list" class="ae-nights-list"></div>
-        </div>
         <div class="settings-field">
           <label class="settings-label">Search for hotel / accommodation</label>
           <input type="text" id="ae-search" class="settings-input" placeholder="🔍 Type to search…"
@@ -3670,7 +3695,7 @@ window.App = {
   pePreviewIcon,
   savePoiEdit,
   setDayAcc,
-  toggleNightAcc,
+  addNewAccommodation,
   setDayRouteMode,
   setTransportType,
   setTransportCost,
