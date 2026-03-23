@@ -953,7 +953,8 @@ function placeMarkers() {
     if (addedAccIds.has(acc.id)) return;
     if (!acc.days.some(d => shownDateArr.includes(d))) return;
     addedAccIds.add(acc.id);
-    const m = L.marker([acc.lat, acc.lng], { icon: makeAccIcon() })
+    const { lat: aLat, lng: aLng } = getAccCoords(acc);
+    const m = L.marker([aLat, aLng], { icon: makeAccIcon() })
       .addTo(State.map)
       .bindPopup(`<div style="padding:8px 10px;"><b>🏨 ${esc(acc.name)}</b><br><span style="font-size:11px;color:#666;">${esc(acc.notes || '')}</span></div>`, { maxWidth: 200 });
     State.accMarkers.push(m);
@@ -1034,7 +1035,7 @@ function getWeatherLocation(dayIndex) {
     if (poi) return { lat: poi.lat, lng: poi.lng };
   }
   const acc = State.trip.accommodations.find(a => a.days.includes(day.date));
-  return acc ? { lat: acc.lat, lng: acc.lng } : null;
+  return acc ? getAccCoords(acc) : null;
 }
 
 async function loadAndRenderWeatherAll(dayIndex) {
@@ -1961,10 +1962,22 @@ function openAccEditModal(accId) {
   const acc = State.trip?.accommodations.find(a => a.id === accId);
   if (!acc) return;
   const edit = State.accEdits[accId] || {};
+  const { lat, lng } = getAccCoords(acc);
   document.getElementById('ae-acc-id').value = accId;
+  document.getElementById('ae-lat').value = lat;
+  document.getElementById('ae-lng').value = lng;
   document.getElementById('ae-name').value = edit.name ?? acc.name;
   document.getElementById('ae-notes').value = edit.notes !== undefined ? edit.notes : (acc.notes || '');
   document.getElementById('ae-price').value = edit.pricePerNight ?? '';
+  document.getElementById('ae-search').value = '';
+  document.getElementById('ae-search-results').innerHTML = '';
+  const badge = document.getElementById('ae-location-badge');
+  if (edit.locationLabel) {
+    badge.textContent = '📍 ' + edit.locationLabel;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
   document.getElementById('acc-edit-modal').classList.remove('hidden');
 }
 
@@ -1972,16 +1985,74 @@ function closeAccEditModal() {
   document.getElementById('acc-edit-modal').classList.add('hidden');
 }
 
+let _aeSearchTimer = null;
+function accLocationSearch(inputEl) {
+  clearTimeout(_aeSearchTimer);
+  const q = inputEl.value.trim();
+  const resultsEl = document.getElementById('ae-search-results');
+  if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+  resultsEl.innerHTML = '<div class="ae-search-loading">🔍 Searching…</div>';
+  _aeSearchTimer = setTimeout(async () => {
+    try {
+      // Search globally for lodging/accommodations — no bounded restriction
+      const params = new URLSearchParams({
+        format: 'json', limit: '6', q, addressdetails: '1',
+        featuretype: 'settlement',
+      });
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`,
+        { headers: { 'Accept-Language': 'en' } });
+      const results = r.ok ? await r.json() : [];
+      if (!results.length) { resultsEl.innerHTML = '<div class="ae-search-empty">No results</div>'; return; }
+      resultsEl.innerHTML = results.map(r => {
+        const name = r.name || r.display_name.split(',')[0];
+        const addr = r.display_name.split(',').slice(1, 3).join(',').trim();
+        return `<div class="ae-search-result" onclick="App.selectAccLocation(${r.lat}, ${r.lon}, '${esc(name)}', '${esc(addr)}')">
+          <span class="ae-result-name">${esc(name)}</span>
+          <span class="ae-result-addr">${esc(addr)}</span>
+        </div>`;
+      }).join('');
+    } catch { resultsEl.innerHTML = '<div class="ae-search-empty">Search failed</div>'; }
+  }, 450);
+}
+
+function selectAccLocation(lat, lng, name, addr) {
+  document.getElementById('ae-lat').value = lat;
+  document.getElementById('ae-lng').value = lng;
+  // Pre-fill name if still default
+  const nameEl = document.getElementById('ae-name');
+  const accId = document.getElementById('ae-acc-id').value;
+  const acc = State.trip?.accommodations.find(a => a.id === accId);
+  if (acc && nameEl.value === acc.name) nameEl.value = name;
+  const label = name + (addr ? ', ' + addr : '');
+  const badge = document.getElementById('ae-location-badge');
+  badge.textContent = '📍 ' + label;
+  badge.style.display = '';
+  document.getElementById('ae-search').value = '';
+  document.getElementById('ae-search-results').innerHTML = '';
+  // Store label for re-opening
+  if (!State._aePendingLabel) State._aePendingLabel = {};
+  State._aePendingLabel[accId] = label;
+}
+
 function saveAccEdit() {
   const accId = document.getElementById('ae-acc-id').value;
   if (!accId) return;
+  const lat = parseFloat(document.getElementById('ae-lat').value);
+  const lng = parseFloat(document.getElementById('ae-lng').value);
+  const acc = State.trip?.accommodations.find(a => a.id === accId);
+  const origCoords = acc ? { lat: acc.lat, lng: acc.lng } : null;
+  // Only store lat/lng if they differ from the original
+  const coordsChanged = origCoords && (Math.abs(lat - origCoords.lat) > 0.0001 || Math.abs(lng - origCoords.lng) > 0.0001);
   State.accEdits[accId] = {
     name: document.getElementById('ae-name').value.trim(),
     notes: document.getElementById('ae-notes').value.trim(),
     pricePerNight: parseFloat(document.getElementById('ae-price').value) || 0,
+    ...(coordsChanged ? { lat, lng } : {}),
+    ...(State._aePendingLabel?.[accId] ? { locationLabel: State._aePendingLabel[accId] } : {}),
   };
   Storage.saveAccEdits(State.trip.id);
   closeAccEditModal();
+  placeMarkers();
   renderAll();
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   showToast('Accommodation updated');
@@ -1992,10 +2063,20 @@ function findNearestDestination(lat, lng) {
   let nearest = null;
   let minDist = Infinity;
   State.trip.accommodations.forEach(acc => {
-    const d = haversineKm(lat, lng, acc.lat, acc.lng);
+    const { lat: aLat, lng: aLng } = getAccCoords(acc);
+    const d = haversineKm(lat, lng, aLat, aLng);
     if (d < minDist) { minDist = d; nearest = acc; }
   });
   return nearest;
+}
+
+// Returns effective lat/lng for an accommodation, respecting any user edits
+function getAccCoords(acc) {
+  const edit = State.accEdits?.[acc.id] || {};
+  return {
+    lat: edit.lat ?? acc.lat,
+    lng: edit.lng ?? acc.lng,
+  };
 }
 
 // ─── Custom Marker (drop-a-pin) ────────────────────────────────
@@ -2177,7 +2258,7 @@ function searchPois(inputEl, dayIndex) {
 async function nominatimSearch(query, dayIndex) {
   const day = getDay(dayIndex);
   const acc = State.trip?.accommodations.find(a => a.days.includes(day?.date));
-  const lat = acc?.lat, lng = acc?.lng;
+  const { lat, lng } = acc ? getAccCoords(acc) : {};
   const delta = 1.2; // ~130 km radius
   try {
     const params = new URLSearchParams({
@@ -2332,14 +2413,15 @@ async function discoverNearby(dayIndex) {
     el.innerHTML = '<div class="discover-loading">🔍 Searching nearby…</div>';
   });
   const radiusM = (State.settings.discoveryRadius || 5) * 1000;
-  const elements = await overpassQuery(acc.lat, acc.lng, radiusM);
+  const { lat: aLat, lng: aLng } = getAccCoords(acc);
+  const elements = await overpassQuery(aLat, aLng, radiusM);
   if (!elements) {
     document.querySelectorAll('.nearby-discover-results').forEach(el => {
       el.innerHTML = '<div class="discover-empty">Discovery service unavailable. Try again.</div>';
     });
     return;
   }
-  renderDiscoverResults(elements, '.nearby-discover-results', acc.lat, acc.lng, dayIndex);
+  renderDiscoverResults(elements, '.nearby-discover-results', aLat, aLng, dayIndex);
 }
 
 async function discoverAlongRoute(dayIndex) {
@@ -2361,8 +2443,10 @@ async function discoverAlongRoute(dayIndex) {
     const arrAcc = State.trip?.accommodations.find(a =>
       a.location?.toLowerCase().includes(day.driving.to?.toLowerCase()));
     if (!depAcc || !arrAcc) { showToast('Load the route first for better results'); return; }
-    midLat = (depAcc.lat + arrAcc.lat) / 2;
-    midLng = (depAcc.lng + arrAcc.lng) / 2;
+    const depCoords = getAccCoords(depAcc);
+    const arrCoords = getAccCoords(arrAcc);
+    midLat = (depCoords.lat + arrCoords.lat) / 2;
+    midLng = (depCoords.lng + arrCoords.lng) / 2;
   }
   const radiusM = (State.settings.routeDiscoveryRadius || 3) * 1000;
   const elements = await overpassQuery(midLat, midLng, radiusM);
@@ -2982,6 +3066,15 @@ function injectModals() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="ae-acc-id">
+        <input type="hidden" id="ae-lat">
+        <input type="hidden" id="ae-lng">
+        <div class="settings-field">
+          <label class="settings-label">Search for hotel / accommodation</label>
+          <input type="text" id="ae-search" class="settings-input" placeholder="🔍 Type to search…"
+            oninput="App.accLocationSearch(this)">
+          <div id="ae-search-results" class="ae-search-results"></div>
+          <div id="ae-location-badge" class="ae-location-badge" style="display:none"></div>
+        </div>
         <div class="settings-field">
           <label class="settings-label">Name</label>
           <input type="text" id="ae-name" class="settings-input" placeholder="Accommodation name">
@@ -2993,7 +3086,7 @@ function injectModals() {
         <div class="settings-field">
           <label class="settings-label">Price per night (€)</label>
           <input type="number" id="ae-price" class="settings-input" min="0" step="1" placeholder="0">
-          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">This will be added to each night's total cost</div>
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Added to each night's total cost</div>
         </div>
       </div>
       <div class="modal-actions">
@@ -3111,6 +3204,8 @@ window.App = {
   openAccEditModal,
   closeAccEditModal,
   saveAccEdit,
+  accLocationSearch,
+  selectAccLocation,
 };
 
 // ─── Initialization ────────────────────────────────────────────
