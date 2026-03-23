@@ -2677,6 +2677,8 @@ function nominatimCategoryMap(type, cls) {
     park: 'park', garden: 'park', beach: 'beach', stadium: 'entertainment',
     castle: 'monument', ruins: 'monument', monument: 'monument', church: 'monument',
     palace: 'monument', cliff: 'nature', peak: 'nature', cave_entrance: 'cave',
+    playground: 'entertainment', water_park: 'entertainment', nature_reserve: 'nature',
+    archaeological_site: 'monument', hot_spring: 'nature',
   };
   return m[type] || m[cls] || 'monument';
 }
@@ -2717,6 +2719,7 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
       <div class="add-poi-name">${esc(name)} ${starHtml}</div>
       ${subtitle ? `<div class="add-poi-meta disc-subtitle">${esc(subtitle)}</div>` : ''}
       ${bits.length ? `<div class="disc-osm-tags">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
+      <div class="disc-coords">${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
     </div>
     <button class="btn-add-poi disc-add-btn" data-disc-key="${esc(key)}" title="Add to day">+</button>
   </div>`;
@@ -2767,11 +2770,14 @@ function addDiscoveredResult(lat, lng, name, category, dayIndex, osmTags) {
 async function overpassQuery(lat, lng, radiusM) {
   const q = `[out:json][timeout:15];
 (node["tourism"~"^(museum|attraction|viewpoint|artwork|gallery|zoo|theme_park)$"](around:${radiusM},${lat},${lng});
+ way["tourism"~"^(museum|attraction|viewpoint|zoo|theme_park)$"]["name"](around:${radiusM},${lat},${lng});
  node["amenity"~"^(restaurant|bar|cafe|pub)$"]["name"](around:${radiusM},${lat},${lng});
- node["leisure"~"^(park|garden|beach)$"]["name"](around:${radiusM},${lat},${lng});
- node["historic"~"^(castle|ruins|monument|building|church|palace|memorial)$"]["name"](around:${radiusM},${lat},${lng});
- node["natural"~"^(beach|cliff|peak|cave_entrance)$"]["name"](around:${radiusM},${lat},${lng});
-);out body;`;
+ node["leisure"~"^(park|garden|beach|water_park|playground)$"]["name"](around:${radiusM},${lat},${lng});
+ way["leisure"~"^(park|garden|beach|water_park|nature_reserve)$"]["name"](around:${radiusM},${lat},${lng});
+ node["historic"~"^(castle|ruins|monument|building|church|palace|memorial|archaeological_site)$"]["name"](around:${radiusM},${lat},${lng});
+ way["historic"~"^(castle|ruins|monument|palace|archaeological_site)$"]["name"](around:${radiusM},${lat},${lng});
+ node["natural"~"^(beach|cliff|peak|cave_entrance|hot_spring)$"]["name"](around:${radiusM},${lat},${lng});
+);out center body;`;
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 15000);
@@ -2787,14 +2793,17 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
   const existingNames = new Set(State.trip?.pois.map(p => p.name.toLowerCase()) || []);
   const fresh = (elements || [])
     .filter(e => e.tags?.name && !existingNames.has(e.tags.name.toLowerCase()))
-    .slice(0, 15);
+    .filter(e => (e.lat && e.lon) || (e.center?.lat && e.center?.lon)) // must have coords
+    .slice(0, 20);
   const html = fresh.length
     ? fresh.map(e => {
+        const lat = e.lat ?? e.center?.lat;
+        const lon = e.lon ?? e.center?.lon;
         const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || 'attraction';
         const cat = nominatimCategoryMap(type, type);
-        const dist = anchorLat ? haversineKm(anchorLat, anchorLng, e.lat, e.lon) : null;
+        const dist = anchorLat ? haversineKm(anchorLat, anchorLng, lat, lon) : null;
         const sub = [type, dist ? formatDist(dist) : null].filter(Boolean).join(' · ');
-        return buildDiscoveredCardHtml(e.lat, e.lon, e.tags.name, cat, sub, dayIndex, e.tags);
+        return buildDiscoveredCardHtml(lat, lon, e.tags.name, cat, sub, dayIndex, e.tags);
       }).join('')
     : '<div class="discover-empty">No new places found. Try increasing the radius in settings.</div>';
   document.querySelectorAll(containerSel).forEach(el => { el.innerHTML = html; });

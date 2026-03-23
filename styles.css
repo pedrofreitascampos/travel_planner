@@ -1701,6 +1701,14 @@ html, body {
 }
 .pe-cost-toggle input[type="checkbox"] { cursor: pointer; }
 
+/* ─── Discovered card coordinates ─── */
+.disc-coords {
+  font-size: 10px;
+  color: var(--color-text-light);
+  font-family: monospace;
+  margin-top: 1px;
+}
+
 /* ─── Accommodation Edit — location search ─── */
 .ae-search-results {
   margin-top: 4px;
