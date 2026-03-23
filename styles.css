@@ -1580,6 +1580,24 @@ html, body {
 }
 .shared-plan-btn-load:hover { background: rgba(255,255,255,0.9); }
 
+/* ─── POI Edit — cost row ─── */
+.pe-cost-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pe-cost-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pe-cost-toggle input[type="checkbox"] { cursor: pointer; }
+
 /* ─── Accommodation Edit — location search ─── */
 .ae-search-results {
   margin-top: 4px;

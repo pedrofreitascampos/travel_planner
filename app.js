@@ -2515,6 +2515,23 @@ function openPoiEditModal(poiId) {
           </div>
         </div>
         <div class="settings-field">
+          <label class="settings-label">Cost</label>
+          <div class="pe-cost-row">
+            <label class="pe-cost-toggle">
+              <input type="checkbox" id="pe-free"
+                ${!(poi.costAmount > 0) ? 'checked' : ''}
+                onchange="document.getElementById('pe-cost-wrap').style.display=this.checked?'none':''">
+              Free entry
+            </label>
+            <div id="pe-cost-wrap" style="display:${poi.costAmount > 0 ? 'flex' : 'none'};align-items:center;gap:6px;flex:1">
+              <span style="font-size:13px;color:var(--color-text-secondary)">€</span>
+              <input id="pe-cost" type="number" class="settings-input" min="0" step="0.5"
+                value="${poi.costAmount > 0 ? poi.costAmount : ''}" placeholder="0" style="flex:1">
+              <span style="font-size:11px;color:var(--color-text-secondary);white-space:nowrap">per person</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-field">
           <label class="settings-label">Notes / description</label>
           <input id="pe-notes" type="text" class="settings-input"
             value="${esc((poi.description || '').slice(0, 200))}" placeholder="Any notes…">
@@ -2546,12 +2563,17 @@ function savePoiEdit(poiId) {
   const duration = parseFloat(document.getElementById('pe-duration')?.value);
   const kids     = parseInt(document.getElementById('pe-kids')?.value, 10);
   const notes    = document.getElementById('pe-notes')?.value.trim();
+  const isFree   = document.getElementById('pe-free')?.checked;
+  const costAmt  = isFree ? 0 : (parseFloat(document.getElementById('pe-cost')?.value) || 0);
   if (name) poi.name = name;
   if (category) poi.category = category;
   poi.emoji = emoji;
   if (!isNaN(duration)) poi.duration = duration;
   if (!isNaN(kids)) { poi.kidsFriendly = kids; poi.kidsRating = kids; }
   if (notes !== undefined) poi.description = notes;
+  poi.costAmount = costAmt;
+  poi.cost = costAmt > 0 ? costAmt : 'free';
+  poi.costLabel = costAmt > 0 ? `€${costAmt % 1 === 0 ? costAmt : costAmt.toFixed(1)} pp` : 'Free';
   if (['imported', 'custom', 'discovered'].includes(poi.source)) Storage.saveImported(State.trip.id);
   document.getElementById('poi-edit-modal')?.classList.add('hidden');
   placeMarkers(); renderAll();
