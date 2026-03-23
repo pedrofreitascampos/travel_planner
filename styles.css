@@ -1739,6 +1739,18 @@ html, body {
 }
 .pe-cost-toggle input[type="checkbox"] { cursor: pointer; }
 
+/* ─── Import booking form ─── */
+.import-booking-section { margin-bottom: 8px; }
+.import-booking-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+}
+
 /* ─── Discovered card coordinates ─── */
 .disc-coords {
   font-size: 10px;

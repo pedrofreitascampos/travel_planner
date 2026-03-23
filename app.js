@@ -3303,6 +3303,54 @@ function importPois() {
   showToast(`Imported ${imported} place${imported !== 1 ? 's' : ''} (${format})`);
 }
 
+function importBooking() {
+  if (!State.trip) { showToast('Load a trip first'); return; }
+  const name = document.getElementById('bk-name')?.value.trim();
+  const checkin = document.getElementById('bk-checkin')?.value;
+  const checkout = document.getElementById('bk-checkout')?.value;
+  const price = parseFloat(document.getElementById('bk-price')?.value) || 0;
+  const ref = document.getElementById('bk-ref')?.value.trim() || '';
+
+  if (!name) { showToast('Enter a hotel/venue name'); return; }
+  if (!checkin || !checkout || checkout < checkin) { showToast('Set valid check-in and check-out dates'); return; }
+
+  // Build the list of nights
+  const nights = [];
+  for (const d = new Date(checkin + 'T12:00:00'); d.toISOString().split('T')[0] <= checkout; d.setDate(d.getDate() + 1)) {
+    nights.push(d.toISOString().split('T')[0]);
+  }
+
+  // Create accommodation
+  const id = 'acc-booking-' + Date.now();
+  const acc = {
+    id, name, location: name,
+    lat: 0, lng: 0,
+    days: [],
+    notes: ref ? `Ref: ${ref}` : '',
+    isUserCreated: true,
+  };
+  State.trip.accommodations.push(acc);
+  State.accEdits[id] = { name, notes: acc.notes, pricePerNight: price };
+
+  // Assign to matching trip days
+  let assigned = 0;
+  nights.forEach(date => {
+    if (State.trip.days.find(d => d.date === date)) {
+      State.dayAccAssignments[date] = id;
+      assigned++;
+    }
+  });
+
+  Storage.save();
+  Storage.saveAccEdits(State.trip.id);
+  Storage.saveUserAccs(State.trip.id);
+  closeImportModal();
+  renderAll();
+  showToast(`Booking "${name}" added (${assigned} night${assigned !== 1 ? 's' : ''})${price ? ` · €${price}/night` : ''}`);
+  // Open edit modal so user can set coordinates via search
+  openAccEditModal(id, true);
+}
+
 // ─── Trip Selector ─────────────────────────────────────────────
 // ─── User Trip Management ───────────────────────────────────────
 
@@ -3331,7 +3379,6 @@ function deleteUserTrip(tripId) {
 }
 
 function createUserTrip(formData) {
-  // formData: { name, emoji, color, destinations: [{name, country, dateFrom, dateTo, accName}] }
   const slug = formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const id = `user-${slug}-${Date.now()}`;
 
@@ -3339,33 +3386,74 @@ function createUserTrip(formData) {
   const accommodations = [];
   const defaultDayPlans = {};
 
+  // Add home as origin if provided
+  if (formData.home) {
+    accommodations.push({
+      id: 'acc-home',
+      name: `Home — ${formData.home}`,
+      location: formData.home,
+      lat: 0, lng: 0,
+      days: [],
+      notes: 'Trip origin & return',
+      isHome: true,
+    });
+  }
+
   formData.destinations.forEach((dest, di) => {
     const start = new Date(dest.dateFrom + 'T12:00:00');
     const end   = new Date(dest.dateTo   + 'T12:00:00');
     const destDays = [];
+    const prevDest = di > 0 ? formData.destinations[di - 1] : null;
     for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
       destDays.push(dateStr);
-      const isFirst = allDays.length === 0;
+      const isFirstDayOfLeg = dateStr === dest.dateFrom;
+      const isFirstDay = allDays.length === 0;
+      // Auto-detect travel day: first day of each leg (except the very first if no home)
+      const fromCity = isFirstDay ? (formData.home || null) : (prevDest?.name || null);
+      const driving = isFirstDayOfLeg && fromCity ? {
+        from: fromCity,
+        to: dest.name,
+        approxKm: 0,
+        approxMin: 0,
+        note: '',
+      } : null;
       allDays.push({
         date: dateStr,
-        label: (di === 0 && isFirst) ? `Arrive ${dest.name}` : dest.name,
+        label: isFirstDayOfLeg && fromCity ? `${fromCity} → ${dest.name}` : dest.name,
         destination: dest.name,
         emoji: dest.emoji || '📍',
         country: dest.country || '',
-        driving: null,
+        driving,
       });
       defaultDayPlans[dateStr] = [];
     }
     accommodations.push({
       id: `acc-${di}`,
-      name: dest.accName || dest.name,
+      name: `Accommodation ${dest.name}`,
       location: dest.country ? `${dest.name}, ${dest.country}` : dest.name,
       lat: 0, lng: 0,
       days: destDays,
       notes: '',
     });
   });
+
+  // Add return day if home is set
+  const lastDest = formData.destinations[formData.destinations.length - 1];
+  if (formData.home && lastDest) {
+    const returnDate = new Date(lastDest.dateTo + 'T12:00:00');
+    returnDate.setDate(returnDate.getDate() + 1);
+    const returnDateStr = returnDate.toISOString().split('T')[0];
+    allDays.push({
+      date: returnDateStr,
+      label: `${lastDest.name} → ${formData.home}`,
+      destination: formData.home,
+      emoji: '🏠',
+      country: '',
+      driving: { from: lastDest.name, to: formData.home, approxKm: 0, approxMin: 0, note: '' },
+    });
+    defaultDayPlans[returnDateStr] = [];
+  }
 
   return {
     id,
@@ -3374,8 +3462,8 @@ function createUserTrip(formData) {
     coverColor: formData.color || '#e07b54',
     emoji: formData.emoji || '✈️',
     isUserCreated: true,
-    startDate: formData.destinations[0].dateFrom,
-    endDate: formData.destinations[formData.destinations.length - 1].dateTo,
+    startDate: allDays[0]?.date,
+    endDate: allDays[allDays.length - 1]?.date,
     pois: [],
     days: allDays,
     accommodations,
@@ -3415,7 +3503,14 @@ function openNewTripForm() {
           </div>
         </div>
 
-        <div class="ntf-section-label">Destinations <button class="ntf-add-dest" onclick="App.ntfAddDestination()">＋ Add</button></div>
+        <div class="ntf-row">
+          <div class="ntf-field ntf-field-grow">
+            <label>Home city (origin &amp; return)</label>
+            <input id="ntf-home" type="text" placeholder="e.g. Lisbon" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="ntf-section-label">Legs / Destinations <button class="ntf-add-dest" onclick="App.ntfAddDestination()">＋ Add</button></div>
         <div id="ntf-destinations"></div>
 
         <div class="ntf-actions">
@@ -3442,11 +3537,11 @@ function ntfAddDestination() {
   row.className = 'ntf-dest-row';
   row.innerHTML = `
     <div class="ntf-dest-fields">
+      <input class="ntf-dest-emoji" type="text" placeholder="📍" maxlength="4" style="width:40px;text-align:center;font-size:18px;" autocomplete="off">
       <input class="ntf-dest-name" type="text" placeholder="City / place name" autocomplete="off">
-      <input class="ntf-dest-country" type="text" placeholder="Country" style="max-width:120px;" autocomplete="off">
-      <input class="ntf-dest-acc" type="text" placeholder="Accommodation (optional)" autocomplete="off">
-      <input class="ntf-dest-from" type="date">
-      <input class="ntf-dest-to"   type="date">
+      <input class="ntf-dest-country" type="text" placeholder="Country" style="max-width:100px;" autocomplete="off">
+      <input class="ntf-dest-from" type="date" title="From">
+      <input class="ntf-dest-to" type="date" title="To">
     </div>
     ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-dest-row').remove()" title="Remove">×</button>` : ''}`;
   container.appendChild(row);
@@ -3462,14 +3557,14 @@ function ntfSubmit() {
   const destinations = [];
   let valid = true;
   rows.forEach(row => {
+    const emoji    = row.querySelector('.ntf-dest-emoji')?.value.trim() || '📍';
     const cityName = row.querySelector('.ntf-dest-name')?.value.trim();
     const country  = row.querySelector('.ntf-dest-country')?.value.trim();
-    const accName  = row.querySelector('.ntf-dest-acc')?.value.trim();
     const dateFrom = row.querySelector('.ntf-dest-from')?.value;
     const dateTo   = row.querySelector('.ntf-dest-to')?.value;
     if (!cityName || !dateFrom || !dateTo) { valid = false; return; }
     if (dateTo < dateFrom) { valid = false; return; }
-    destinations.push({ name: cityName, country, accName, dateFrom, dateTo });
+    destinations.push({ name: cityName, country, emoji, dateFrom, dateTo });
   });
 
   if (!valid) { showToast('Fill in name + dates for each destination (to ≥ from)'); return; }
@@ -3478,6 +3573,7 @@ function ntfSubmit() {
     name,
     emoji: document.getElementById('ntf-emoji')?.value.trim() || '✈️',
     color: document.getElementById('ntf-color')?.value || '#e07b54',
+    home: document.getElementById('ntf-home')?.value.trim() || '',
     destinations,
   });
 
@@ -3601,8 +3697,26 @@ function loadTrip(tripId) {
     }
   });
 
-  // Header
-  document.querySelector('.header-title').textContent = trip.name;
+  // Header — editable title for user-created trips
+  const titleEl = document.querySelector('.header-title');
+  titleEl.textContent = trip.name;
+  if (trip.isUserCreated) {
+    titleEl.contentEditable = 'true';
+    titleEl.spellcheck = false;
+    titleEl.title = 'Click to rename trip';
+    titleEl.onblur = () => {
+      const newName = titleEl.textContent.trim();
+      if (newName && newName !== trip.name) {
+        trip.name = newName;
+        const userTrips = Storage.loadUserTrips();
+        const ut = userTrips.find(t => t.id === trip.id);
+        if (ut) { ut.name = newName; Storage.saveUserTrips(userTrips); }
+      }
+    };
+    titleEl.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); } };
+  } else {
+    titleEl.contentEditable = 'false';
+  }
   document.querySelector('.header-subtitle').textContent = trip.subtitle ?? '';
 
   // Build panel DOM
@@ -3710,6 +3824,21 @@ function injectModals() {
             📍 <strong>GeoJSON</strong> — FeatureCollection or Feature
           </div>
         </div>
+        <details class="import-booking-section">
+          <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--color-accent);margin-bottom:8px;">📋 Add a booking (hotel, activity…)</summary>
+          <div class="import-booking-form">
+            <input id="bk-name" class="settings-input" type="text" placeholder="Hotel / venue name">
+            <div style="display:flex;gap:6px;">
+              <input id="bk-checkin" class="settings-input" type="date" style="flex:1" title="Check-in">
+              <input id="bk-checkout" class="settings-input" type="date" style="flex:1" title="Check-out">
+            </div>
+            <div style="display:flex;gap:6px;">
+              <input id="bk-price" class="settings-input" type="number" min="0" step="1" placeholder="€/night" style="flex:1">
+              <input id="bk-ref" class="settings-input" type="text" placeholder="Booking ref (optional)" style="flex:1">
+            </div>
+            <button class="modal-btn modal-btn-save" style="width:100%;margin-top:4px;" onclick="App.importBooking()">Add Booking</button>
+          </div>
+        </details>
         <textarea id="import-json" class="import-textarea" placeholder="Paste content here (JSON, KML, or CSV)…"></textarea>
         <div id="import-preview"></div>
       </div>
@@ -3717,7 +3846,7 @@ function injectModals() {
         <button class="modal-btn" style="background:var(--color-card-bg);border:1px solid var(--color-border);color:var(--color-text-secondary);margin-right:auto;"
           onclick="App.importPlanFile()" title="Load a previously exported plan .json file">📁 Import Plan File</button>
         <button class="modal-btn modal-btn-cancel" onclick="App.closeImportModal()">Cancel</button>
-        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import</button>
+        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import Places</button>
       </div>
     </div>
   </div>
@@ -4085,6 +4214,7 @@ window.App = {
   importPois,
   closeTripSelector,
   deleteUserTrip,
+  importBooking,
   openNewTripForm,
   closeNewTripForm,
   ntfAddDestination,
