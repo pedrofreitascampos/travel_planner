@@ -1707,7 +1707,6 @@ html, body {
   cursor: pointer;
   transition: all var(--trans-fast);
 }
-.ae-night-toggle input { display: none; }
 .ae-night-toggle.active {
   background: var(--color-accent-light);
   border-color: var(--color-accent);

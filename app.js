@@ -2078,6 +2078,21 @@ function setDayRouteMode(date, mode) {
 }
 
 // ─── Day Accommodation & Transport ─────────────────────────────
+function toggleNightAcc(date, accId, btn) {
+  const current = getEffectiveAcc(date);
+  const isAssigned = current?.id === accId;
+  if (isAssigned) {
+    delete State.dayAccAssignments[date];
+    btn.classList.remove('active');
+  } else {
+    State.dayAccAssignments[date] = accId;
+    btn.classList.add('active');
+  }
+  Storage.save();
+  renderAll();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+}
+
 function setDayAcc(date, accId) {
   if (accId) State.dayAccAssignments[date] = accId;
   else delete State.dayAccAssignments[date];
@@ -2122,17 +2137,16 @@ function openAccEditModal(accId) {
   } else {
     badge.style.display = 'none';
   }
-  // Populate nights assignment checkboxes
+  // Populate nights assignment toggles
   const nightsEl = document.getElementById('ae-nights-list');
   if (nightsEl && State.trip) {
     nightsEl.innerHTML = State.trip.days.map(d => {
       const currentAcc = getEffectiveAcc(d.date);
       const isAssigned = currentAcc?.id === accId;
-      return `<label class="ae-night-toggle${isAssigned ? ' active' : ''}">
-        <input type="checkbox" data-date="${d.date}" ${isAssigned ? 'checked' : ''}
-          onchange="App.setDayAcc('${d.date}', this.checked ? '${accId}' : '')">
-        <span>${formatShortDate(d.date)}</span>
-      </label>`;
+      return `<button type="button" class="ae-night-toggle${isAssigned ? ' active' : ''}"
+        onclick="App.toggleNightAcc('${d.date}', '${accId}', this)">
+        ${formatShortDate(d.date)}
+      </button>`;
     }).join('');
   }
 
@@ -3656,6 +3670,7 @@ window.App = {
   pePreviewIcon,
   savePoiEdit,
   setDayAcc,
+  toggleNightAcc,
   setDayRouteMode,
   setTransportType,
   setTransportCost,
