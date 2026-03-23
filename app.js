@@ -1156,7 +1156,12 @@ async function findNearestAirport(lat, lng) {
   const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
   if (_airportCache[key] !== undefined) return _airportCache[key];
   try {
-    const q = `[out:json][timeout:10];node["aeroway"="aerodrome"]["iata"](around:150000,${lat},${lng});out body 3;`;
+    // Query both node and way — airports are usually mapped as ways/relations in OSM
+    const q = `[out:json][timeout:12];
+(node["aeroway"="aerodrome"]["iata"](around:200000,${lat},${lng});
+ way["aeroway"="aerodrome"]["iata"](around:200000,${lat},${lng});
+ relation["aeroway"="aerodrome"]["iata"](around:200000,${lat},${lng});
+);out center body 5;`;
     const r = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST', body: 'data=' + encodeURIComponent(q),
     });
@@ -1164,9 +1169,16 @@ async function findNearestAirport(lat, lng) {
     const data = await r.json();
     const airports = (data.elements || [])
       .filter(e => e.tags?.iata && e.tags?.name)
+      .map(e => ({
+        lat: e.lat ?? e.center?.lat,
+        lon: e.lon ?? e.center?.lon,
+        name: e.tags.name,
+        iata: e.tags.iata,
+      }))
+      .filter(a => a.lat && a.lon)
       .sort((a, b) => haversineKm(lat, lng, a.lat, a.lon) - haversineKm(lat, lng, b.lat, b.lon));
     const best = airports[0];
-    _airportCache[key] = best ? { lat: best.lat, lng: best.lon, name: best.tags.name, iata: best.tags.iata } : null;
+    _airportCache[key] = best ? { lat: best.lat, lng: best.lon, name: best.name, iata: best.iata } : null;
     return _airportCache[key];
   } catch { _airportCache[key] = null; return null; }
 }
