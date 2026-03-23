@@ -449,13 +449,18 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   const walkKm = (routeDistKm != null && dayMode === 'foot') ? routeDistKm : 0;
 
   // ── Cost ──────────────────────────────────────────────────────
-  const poiEntryCost = pois.reduce((sum, p) => {
-    // costAmount is the canonical per-person value; fall back to p.cost only if it's numeric
-    const amt = parseFloat(p.costAmount);
-    const fallback = parseFloat(p.cost);
-    return sum + (isNaN(amt) ? (isNaN(fallback) ? 0 : fallback) : amt);
-  }, 0) * partySize;
-  const mealsCost = dailyMealBudget * partySize;
+  const foodCategories = new Set(['food', 'bar']);
+  const foodPois = pois.filter(p => foodCategories.has(p.category));
+  const nonFoodPois = pois.filter(p => !foodCategories.has(p.category));
+
+  const poiCostPP = p => { const a = parseFloat(p.costAmount); const f = parseFloat(p.cost); return isNaN(a) ? (isNaN(f) ? 0 : f) : a; };
+
+  const poiEntryCost = nonFoodPois.reduce((s, p) => s + poiCostPP(p), 0) * partySize;
+  const plannedFoodCost = foodPois.reduce((s, p) => s + poiCostPP(p), 0) * partySize;
+  const mealsPerDay = 3;
+  const unplannedMeals = Math.max(0, mealsPerDay - foodPois.length);
+  const unplannedMealsCost = (unplannedMeals / mealsPerDay) * dailyMealBudget * partySize;
+  const mealsCost = plannedFoodCost + unplannedMealsCost;
   const dayTransportOverride = State.dayTransport[day.date] || {};
   const transportType = dayTransportOverride.type || (day.driving ? 'driving' : null);
   let fuelCost = 0;
@@ -646,12 +651,20 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   // Build detailed cost explanation for tooltip
   const costLines = [];
   if (poiEntryCost > 0) {
-    const perPerson = pois.reduce((s, p) => { const a = parseFloat(p.costAmount); return s + (isNaN(a) ? 0 : a); }, 0);
+    const perPerson = nonFoodPois.reduce((s, p) => s + poiCostPP(p), 0);
     costLines.push(`Entries: €${perPerson.toFixed(0)}/person × ${partySize} = €${poiEntryCost.toFixed(0)}`);
   } else {
     costLines.push('Entries: Free');
   }
-  costLines.push(`Meals: €${dailyMealBudget}/person × ${partySize} people = €${mealsCost.toFixed(0)}`);
+  const mealParts = [];
+  if (plannedFoodCost > 0) {
+    const ppFood = foodPois.reduce((s, p) => s + poiCostPP(p), 0);
+    mealParts.push(`${foodPois.length} planned (€${ppFood.toFixed(0)}/pp × ${partySize} = €${plannedFoodCost.toFixed(0)})`);
+  }
+  if (unplannedMeals > 0) {
+    mealParts.push(`${unplannedMeals} unplanned (€${(dailyMealBudget/mealsPerDay).toFixed(0)}/meal/pp × ${partySize} = €${unplannedMealsCost.toFixed(0)})`);
+  }
+  costLines.push(`Meals: ${mealParts.join(' + ')} = €${mealsCost.toFixed(0)}`);
   if (day.driving && transportType === 'driving') {
     const interKm = day.driving.approxKm || 0;
     costLines.push(`Fuel: ${interKm}${inCityDriveKm > 0 ? '+' + inCityDriveKm.toFixed(0) : ''} km × ${carConsumption}L/100km × €${fuelPrice}/L = €${fuelCost.toFixed(0)}`);
