@@ -116,6 +116,7 @@ const State = {
   dayTransport: {},       // 'YYYY-MM-DD' → { type, costPerPerson, durationMin }
   dayRouteMode: {},       // 'YYYY-MM-DD' → 'foot' | 'driving'
   dayLabels: {},          // 'YYYY-MM-DD' → custom label string
+  dayEmojis: {},          // 'YYYY-MM-DD' → custom emoji
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -137,6 +138,7 @@ const Storage = {
         dayTransport: State.dayTransport,
         dayRouteMode: State.dayRouteMode,
         dayLabels: State.dayLabels,
+        dayEmojis: State.dayEmojis,
       }));
     } catch (e) { /* quota exceeded — ignore */ }
   },
@@ -1339,7 +1341,7 @@ function renderDayTabs() {
     const color = getDayColor(i);
     return `<div class="day-tab${active ? ' active' : ''}" data-idx="${i}" onclick="App.selectDay(${i})"
         style="${active ? `background:${color};` : ''}">
-      <div class="tab-emoji">${day.emoji}</div>
+      <div class="tab-emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
       <div class="tab-weather"></div>
       <div class="tab-label">${esc(getEffectiveDayLabel(day))}</div>
       <div class="tab-date">${formatShortDate(day.date)}</div>
@@ -1464,7 +1466,10 @@ function renderDayPlanContent(dayIndex) {
   const contentHtml = `
     <div class="day-header">
       <div class="day-header-top">
-        <div class="day-header-emoji">${day.emoji}</div>
+        <div class="day-header-emoji" contenteditable="true" spellcheck="false"
+          onblur="App.saveDayEmoji('${day.date}', this.textContent)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+          title="Click to change emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
         <div class="day-header-info">
           <div class="day-header-title" contenteditable="true" spellcheck="false"
             onblur="App.saveDayLabel('${day.date}', this.textContent)"
@@ -2291,6 +2296,14 @@ function closeImportModal() {
 // ─── Per-Day Route Mode ─────────────────────────────────────────
 function getEffectiveRouteMode(date) {
   return State.dayRouteMode[date] || State.layers.routeMode;
+}
+
+function saveDayEmoji(date, text) {
+  const trimmed = text.trim();
+  if (!trimmed) { delete State.dayEmojis[date]; }
+  else { State.dayEmojis[date] = trimmed; }
+  Storage.save();
+  renderDayTabs();
 }
 
 function saveDayLabel(date, text) {
@@ -3522,6 +3535,7 @@ function loadTrip(tripId) {
     State.dayTransport = saved.dayTransport ?? {};
     State.dayRouteMode = saved.dayRouteMode ?? {};
     State.dayLabels = saved.dayLabels ?? {};
+    State.dayEmojis = saved.dayEmojis ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
@@ -3530,6 +3544,7 @@ function loadTrip(tripId) {
     State.dayTransport = {};
     State.dayRouteMode = {};
     State.dayLabels = {};
+    State.dayEmojis = {};
   }
 
   // Load party config and settings
@@ -4045,6 +4060,7 @@ window.App = {
   savePoiEdit,
   setDayAcc,
   saveDayLabel,
+  saveDayEmoji,
   setDiscoveryRadius,
   setRouteDiscoveryRadius,
   addNewAccommodation,
