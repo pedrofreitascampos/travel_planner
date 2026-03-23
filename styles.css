@@ -1250,6 +1250,36 @@ html, body {
 }
 .search-result-card { border-left: 2px solid var(--color-accent) !important; }
 
+/* Inline star rating on search/discover cards */
+.disc-stars {
+  display: inline-block;
+  font-size: 10px;
+  color: #f0c040;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+  margin-left: 3px;
+}
+.disc-stars-label {
+  font-size: 9px;
+  color: var(--color-text-light);
+  font-weight: 600;
+}
+
+/* OSM tag chips */
+.disc-osm-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 2px;
+}
+.disc-osm-tags span {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
 /* Edit button on add-cards */
 .btn-edit-sm {
   background: none; border: none; font-size: 13px;

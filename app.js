@@ -2123,11 +2123,11 @@ async function nominatimSearch(query, dayIndex) {
   const day = getDay(dayIndex);
   const acc = State.trip?.accommodations.find(a => a.days.includes(day?.date));
   const lat = acc?.lat, lng = acc?.lng;
-  const delta = 0.8;
+  const delta = 1.2; // ~130 km radius
   try {
     const params = new URLSearchParams({
       format: 'json', limit: '8', q: query, addressdetails: '1', extratags: '1',
-      ...(lat && lng ? { viewbox: `${lng-delta},${lat+delta},${lng+delta},${lat-delta}`, bounded: '0' } : {}),
+      ...(lat && lng ? { viewbox: `${lng-delta},${lat+delta},${lng+delta},${lat-delta}`, bounded: '1' } : {}),
     });
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 8000);
@@ -2163,25 +2163,29 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
 
   // Mini meta from OSM tags
   const t = osmTags || {};
-  const bits = [
-    t.cuisine              ? `🍴 ${t.cuisine.split(';')[0].replace(/_/g,' ')}` : null,
-    t['michelin:stars']    ? `${'⭐'.repeat(+t['michelin:stars'])} Michelin`   : null,
-    t.stars                ? `${'★'.repeat(Math.min(+t.stars,5))} stars`        : null,
-    t.opening_hours        ? `🕐 ${t.opening_hours.split(';')[0]}`              : null,
-    t.wheelchair === 'yes' ? `♿`                                               : null,
-  ].filter(Boolean);
 
-  // Google Maps search URL — name + coords = GMaps shows the place with live ratings
-  const gmapsSearch = `https://www.google.com/maps/search/${encodeURIComponent(name)}/@${lat},${lng},17z`;
+  // Star rating: prefer Michelin stars, fall back to hotel/venue stars tag
+  let starHtml = '';
+  if (t['michelin:stars']) {
+    const n = Math.min(+t['michelin:stars'], 3);
+    starHtml = `<span class="disc-stars" title="Michelin ${n}★">${'★'.repeat(n)}<span class="disc-stars-label"> Michelin</span></span>`;
+  } else if (t.stars) {
+    const n = Math.min(+t.stars, 5);
+    starHtml = `<span class="disc-stars" title="${n} stars">${'★'.repeat(n)}${'☆'.repeat(5-n)}</span>`;
+  }
+
+  const bits = [
+    t.cuisine       ? t.cuisine.split(';')[0].replace(/_/g,' ') : null,
+    t.opening_hours ? `🕐 ${t.opening_hours.split(';')[0]}`     : null,
+    t.wheelchair === 'yes' ? '♿' : null,
+  ].filter(Boolean);
 
   return `<div class="add-poi-card search-result-card">
     <div class="add-poi-icon">${cat.icon}</div>
     <div class="add-poi-info">
-      <div class="add-poi-name">${esc(name)}</div>
+      <div class="add-poi-name">${esc(name)} ${starHtml}</div>
       ${subtitle ? `<div class="add-poi-meta disc-subtitle">${esc(subtitle)}</div>` : ''}
-      ${bits.length ? `<div class="disc-osm-tags">${bits.map(esc).join(' · ')}</div>` : ''}
-      <a class="disc-gmaps-rating" href="${gmapsSearch}" target="_blank" rel="noopener"
-         onclick="event.stopPropagation()">🌟 Ratings &amp; reviews on Google Maps ↗</a>
+      ${bits.length ? `<div class="disc-osm-tags">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
     </div>
     <button class="btn-add-poi disc-add-btn" data-disc-key="${esc(key)}" title="Add to day">+</button>
   </div>`;
