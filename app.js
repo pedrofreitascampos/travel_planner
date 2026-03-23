@@ -1063,6 +1063,30 @@ async function drawRoute(dayIndex) {
 }
 
 // ─── Inter-City Route ──────────────────────────────────────────
+function getHomeAcc() {
+  return State.trip?.accommodations.find(a => a.isHome) || null;
+}
+
+function greatCirclePoints(lat1, lng1, lat2, lng2, n) {
+  const toR = d => d * Math.PI / 180, toD = r => r * 180 / Math.PI;
+  const φ1 = toR(lat1), λ1 = toR(lng1), φ2 = toR(lat2), λ2 = toR(lng2);
+  const d = 2 * Math.asin(Math.sqrt(
+    Math.sin((φ1 - φ2) / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ1 - λ2) / 2) ** 2
+  ));
+  if (d < 1e-10) return [[lat1, lng1], [lat2, lng2]];
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+    pts.push([toD(Math.atan2(z, Math.sqrt(x * x + y * y))), toD(Math.atan2(y, x))]);
+  }
+  return pts;
+}
+
 async function drawInterCityRoute(dayIndex) {
   if (State.interCityPolyline) {
     State.map.removeLayer(State.interCityPolyline);
@@ -1073,13 +1097,41 @@ async function drawInterCityRoute(dayIndex) {
   const day = getDay(dayIndex);
   if (!day?.driving || !State.map) return;
 
+  // Departure: previous night's acc, or home if first day
   const prevDate = State.trip.days[dayIndex - 1]?.date;
-  const depAcc = prevDate ? getEffectiveAcc(prevDate) : null;
-  const arrAcc = getEffectiveAcc(day.date);
-  if (!depAcc || !arrAcc) return;
+  let depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  // Arrival: tonight's acc, or home if same as departure (driving away to home)
+  let arrAcc = getEffectiveAcc(day.date);
+  if (arrAcc && depAcc && arrAcc.id === depAcc.id) arrAcc = getHomeAcc();
+  if (!depAcc && !arrAcc) return;
+  // If only one is missing, try home
+  if (!depAcc) depAcc = getHomeAcc();
+  if (!arrAcc) arrAcc = getHomeAcc();
+  if (!depAcc || !arrAcc || depAcc.id === arrAcc.id) return;
 
   const depC = getAccCoords(depAcc);
   const arrC = getAccCoords(arrAcc);
+
+  // Check transport type — use great circle for flights
+  const dayTransportOverride = State.dayTransport[day.date] || {};
+  const tType = dayTransportOverride.type || 'driving';
+
+  if (tType === 'flight') {
+    // Draw great circle arc
+    const pts = greatCirclePoints(depC.lat, depC.lng, arrC.lat, arrC.lng, 50);
+    State.interCityPolyline = L.polyline(pts, {
+      color: '#1565c0',
+      weight: 3,
+      opacity: 0.6,
+      dashArray: '6,8',
+    }).addTo(State.map);
+    // Store a minimal result for discoverAlongRoute
+    const geoCoords = pts.map(([lat, lng]) => [lng, lat]);
+    State.lastInterCityResult = { geojson: { coordinates: geoCoords } };
+    return;
+  }
+
+  // Driving/train/bus — use OSRM driving route
   const result = await fetchRoute([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], 'driving');
   if (!result) return;
   State.lastInterCityResult = result;
@@ -1272,10 +1324,12 @@ function renderDayPlanContent(dayIndex) {
   // Accommodation for this day
   // Night's accommodation (where you sleep)
   const dayAcc = getEffectiveAcc(day.date);
-  // On driving days show departure location as prev day's acc, arrival as tonight's
+  // On driving days show departure (prev night or home) and arrival (tonight or home)
   const prevDate = State.trip.days[dayIndex - 1]?.date;
-  const departureAcc = day.driving && prevDate ? getEffectiveAcc(prevDate) : null;
-  const arrivalAcc   = day.driving ? dayAcc : null;
+  let departureAcc = day.driving ? (prevDate ? getEffectiveAcc(prevDate) : getHomeAcc()) : null;
+  let arrivalAcc   = day.driving ? dayAcc : null;
+  // If arrival = departure (driving away), arrival is home
+  if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id) arrivalAcc = getHomeAcc();
 
   const allAccs = State.trip.accommodations;
   const accSelectHtml = (selectedId, date) => {
