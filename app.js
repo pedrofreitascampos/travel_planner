@@ -115,6 +115,7 @@ const State = {
   dayAccAssignments: {},  // 'YYYY-MM-DD' → accId override
   dayTransport: {},       // 'YYYY-MM-DD' → { type, costPerPerson, durationMin }
   dayRouteMode: {},       // 'YYYY-MM-DD' → 'foot' | 'driving'
+  dayLabels: {},          // 'YYYY-MM-DD' → custom label string
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -135,6 +136,7 @@ const Storage = {
         dayAccAssignments: State.dayAccAssignments,
         dayTransport: State.dayTransport,
         dayRouteMode: State.dayRouteMode,
+        dayLabels: State.dayLabels,
       }));
     } catch (e) { /* quota exceeded — ignore */ }
   },
@@ -462,27 +464,35 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   const unplannedMealsCost = (unplannedMeals / mealsPerDay) * dailyMealBudget * partySize;
   const mealsCost = plannedFoodCost + unplannedMealsCost;
   const dayTransportOverride = State.dayTransport[day.date] || {};
-  const transportType = dayTransportOverride.type || (day.driving ? 'driving' : null);
+  // Compute inter-city distance: from trip data or from acc coords
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  const arrAcc = getEffectiveAcc(day.date);
+  let interCityKm = day.driving?.approxKm || 0;
+  // If no trip-data driving but accs differ, estimate from coords
+  if (!interCityKm && depAcc && arrAcc && depAcc.id !== arrAcc.id) {
+    const dc = getAccCoords(depAcc), ac = getAccCoords(arrAcc);
+    interCityKm = Math.round(haversineKm(dc.lat, dc.lng, ac.lat, ac.lng) * 1.3); // ~30% road factor
+  }
+  const hasInterCity = interCityKm > 0;
+  const transportType = dayTransportOverride.type || (hasInterCity ? 'driving' : null);
   let fuelCost = 0;
   let transportCost = 0;
   // In-city driving fuel (only when day's route mode is driving, not walking)
   const inCityDriveKm = (routeDistKm != null && dayMode === 'driving') ? routeDistKm : 0;
-  if (day.driving) {
+  if (hasInterCity) {
     if (transportType === 'driving') {
-      // Inter-city km + in-city driving km
-      const totalKm = (day.driving.approxKm || 0) + inCityDriveKm;
+      const totalKm = interCityKm + inCityDriveKm;
       fuelCost = (totalKm / 100) * carConsumption * fuelPrice;
       transportCost = fuelCost;
     } else if (dayTransportOverride.costPerPerson) {
       transportCost = dayTransportOverride.costPerPerson * partySize;
-      // Still add in-city driving fuel if applicable
       if (inCityDriveKm > 0) {
         fuelCost = (inCityDriveKm / 100) * carConsumption * fuelPrice;
         transportCost += fuelCost;
       }
     }
   } else if (inCityDriveKm > 0) {
-    // Non-driving day but in-city mode is driving
     fuelCost = (inCityDriveKm / 100) * carConsumption * fuelPrice;
     transportCost = fuelCost;
   }
@@ -664,9 +674,8 @@ function calcDayMetrics(dayIndex, routeDistKm) {
     mealParts.push(`${unplannedMeals} unplanned (€${(dailyMealBudget/mealsPerDay).toFixed(0)}/meal/pp × ${partySize} = €${unplannedMealsCost.toFixed(0)})`);
   }
   costLines.push(`Meals: ${mealParts.join(' + ')} = €${mealsCost.toFixed(0)}`);
-  if (day.driving && transportType === 'driving') {
-    const interKm = day.driving.approxKm || 0;
-    costLines.push(`Fuel: ${interKm}${inCityDriveKm > 0 ? '+' + inCityDriveKm.toFixed(0) : ''} km × ${carConsumption}L/100km × €${fuelPrice}/L = €${fuelCost.toFixed(0)}`);
+  if (hasInterCity && transportType === 'driving') {
+    costLines.push(`Fuel: ${interCityKm}${inCityDriveKm > 0 ? '+' + inCityDriveKm.toFixed(0) : ''} km × ${carConsumption}L/100km × €${fuelPrice}/L = €${fuelCost.toFixed(0)}`);
   } else if (transportCost > 0) {
     costLines.push(`Transport: €${(dayTransportOverride.costPerPerson || 0)}/person × ${partySize} = €${(dayTransportOverride.costPerPerson || 0) * partySize}`);
   }
@@ -1317,7 +1326,7 @@ function renderDayTabs() {
         style="${active ? `background:${color};` : ''}">
       <div class="tab-emoji">${day.emoji}</div>
       <div class="tab-weather"></div>
-      <div class="tab-label">${esc(day.destination)}</div>
+      <div class="tab-label">${esc(State.dayLabels?.[day.date] || day.destination)}</div>
       <div class="tab-date">${formatShortDate(day.date)}</div>
     </div>`;
   }).join('');
@@ -1442,7 +1451,9 @@ function renderDayPlanContent(dayIndex) {
       <div class="day-header-top">
         <div class="day-header-emoji">${day.emoji}</div>
         <div class="day-header-info">
-          <div class="day-header-title">${esc(day.label)}</div>
+          <div class="day-header-title" contenteditable="true" spellcheck="false"
+            onblur="App.saveDayLabel('${day.date}', this.textContent)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">${esc(State.dayLabels?.[day.date] || day.label)}</div>
           <div class="day-header-date">${formatDate(day.date)} · ${esc(day.country)}</div>
         </div>
       </div>
@@ -2260,6 +2271,19 @@ function closeImportModal() {
 // ─── Per-Day Route Mode ─────────────────────────────────────────
 function getEffectiveRouteMode(date) {
   return State.dayRouteMode[date] || State.layers.routeMode;
+}
+
+function saveDayLabel(date, text) {
+  const trimmed = text.trim();
+  const day = State.trip?.days.find(d => d.date === date);
+  if (!day) return;
+  if (trimmed && trimmed !== day.label) {
+    State.dayLabels[date] = trimmed;
+  } else {
+    delete State.dayLabels[date];
+  }
+  Storage.save();
+  renderDayTabs(); // update tab label
 }
 
 function setDayRouteMode(date, mode) {
@@ -3415,6 +3439,7 @@ function loadTrip(tripId) {
     State.dayAccAssignments = saved.dayAccAssignments ?? {};
     State.dayTransport = saved.dayTransport ?? {};
     State.dayRouteMode = saved.dayRouteMode ?? {};
+    State.dayLabels = saved.dayLabels ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
@@ -3422,6 +3447,7 @@ function loadTrip(tripId) {
     State.dayAccAssignments = {};
     State.dayTransport = {};
     State.dayRouteMode = {};
+    State.dayLabels = {};
   }
 
   // Load party config and settings
@@ -3937,6 +3963,7 @@ window.App = {
   pePreviewIcon,
   savePoiEdit,
   setDayAcc,
+  saveDayLabel,
   setDiscoveryRadius,
   setRouteDiscoveryRadius,
   addNewAccommodation,
