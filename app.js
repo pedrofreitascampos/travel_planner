@@ -108,7 +108,7 @@ const State = {
     carConsumption: 7.5,
     dailyMealBudget: 22,
     discoveryRadius: 5,       // km — nearby POI discovery
-    routeDiscoveryRadius: 3,  // km — along-route discovery
+    routeDiscoveryRadius: 5,  // km — along-route discovery
   },
   importedPois: [],       // POIs imported from Google Maps
   accEdits: {},           // accId → { name, notes, pricePerNight, lat, lng }
@@ -894,10 +894,16 @@ function initMap(lat, lng) {
     zoomControl: true,
   });
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
-  }).addTo(State.map);
+  });
+  const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '© Esri, Maxar, Earthstar Geographics',
+    maxZoom: 19,
+  });
+  osmLayer.addTo(State.map);
+  L.control.layers({ 'Map': osmLayer, 'Satellite': satLayer }, null, { position: 'topright' }).addTo(State.map);
 
   // Custom marker mode: click on map to drop a pin
   State.map.on('click', e => {
@@ -1120,9 +1126,9 @@ async function drawInterCityRoute(dayIndex) {
     // Draw great circle arc
     const pts = greatCirclePoints(depC.lat, depC.lng, arrC.lat, arrC.lng, 50);
     State.interCityPolyline = L.polyline(pts, {
-      color: '#1565c0',
+      color: '#e53935',
       weight: 3,
-      opacity: 0.6,
+      opacity: 0.7,
       dashArray: '6,8',
     }).addTo(State.map);
     // Store a minimal result for discoverAlongRoute
@@ -1139,17 +1145,17 @@ async function drawInterCityRoute(dayIndex) {
   if (result.geojson) {
     State.interCityPolyline = L.geoJSON(result.geojson, {
       style: {
-        color: '#4a6fa5',
-        weight: 5,
-        opacity: 0.35,
+        color: '#e53935',
+        weight: 4,
+        opacity: 0.6,
         dashArray: '10,6',
       },
     }).addTo(State.map);
   } else {
     State.interCityPolyline = L.polyline([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], {
-      color: '#4a6fa5',
-      weight: 4,
-      opacity: 0.3,
+      color: '#e53935',
+      weight: 3,
+      opacity: 0.5,
       dashArray: '10,6',
     }).addTo(State.map);
   }
@@ -1421,7 +1427,10 @@ function renderDayPlanContent(dayIndex) {
         <!-- Along the route -->
         <div class="discover-group">
           <div class="discover-group-label">
-            🛣️ Along the route
+            🛣️ Along the route ·
+            <input type="number" class="discover-radius-input" min="1" max="50" step="1"
+              value="${State.settings.routeDiscoveryRadius}"
+              onchange="App.setRouteDiscoveryRadius(this.value)" title="Search radius in km"> km
             <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">Load</button>
           </div>
           <div class="route-discover-results"></div>
@@ -2209,6 +2218,11 @@ function setDiscoveryRadius(value) {
   Storage.saveSettings();
 }
 
+function setRouteDiscoveryRadius(value) {
+  State.settings.routeDiscoveryRadius = Math.max(1, Math.min(50, parseFloat(value) || 5));
+  Storage.saveSettings();
+}
+
 function setTransportType(date, type) {
   if (!State.dayTransport[date]) State.dayTransport[date] = {};
   State.dayTransport[date].type = type;
@@ -2764,13 +2778,17 @@ async function discoverAlongRoute(dayIndex) {
       samplePoints.push({ lat, lng });
     });
   } else {
-    // Fallback: midpoint between departure and arrival accommodations
+    // Fallback: sample between departure and arrival accommodations
     const prevDate = State.trip.days[dayIndex - 1]?.date;
-    const depAcc = prevDate ? getEffectiveAcc(prevDate) : null;
-    const arrAcc = getEffectiveAcc(day.date);
-    if (!depAcc || !arrAcc) { showToast('Wait for the route to load, or set accommodations'); return; }
+    const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+    let arrAcc = getEffectiveAcc(day.date);
+    if (arrAcc && depAcc && arrAcc.id === depAcc.id) arrAcc = getHomeAcc();
+    if (!depAcc || !arrAcc) { showToast('Set accommodations for departure and arrival first'); return; }
     const d = getAccCoords(depAcc), a = getAccCoords(arrAcc);
-    samplePoints = [{ lat: (d.lat + a.lat) / 2, lng: (d.lng + a.lng) / 2 }];
+    // Sample 3 points between departure and arrival
+    [0.25, 0.5, 0.75].forEach(f => {
+      samplePoints.push({ lat: d.lat + (a.lat - d.lat) * f, lng: d.lng + (a.lng - d.lng) * f });
+    });
   }
 
   const radiusM = (State.settings.routeDiscoveryRadius || 3) * 1000;
@@ -3817,6 +3835,7 @@ window.App = {
   savePoiEdit,
   setDayAcc,
   setDiscoveryRadius,
+  setRouteDiscoveryRadius,
   addNewAccommodation,
   setDayRouteMode,
   setTransportType,
