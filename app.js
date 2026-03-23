@@ -460,14 +460,26 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   const transportType = dayTransportOverride.type || (day.driving ? 'driving' : null);
   let fuelCost = 0;
   let transportCost = 0;
+  // In-city driving fuel (only when day's route mode is driving, not walking)
+  const inCityDriveKm = (routeDistKm != null && dayMode === 'driving') ? routeDistKm : 0;
   if (day.driving) {
     if (transportType === 'driving') {
-      const km = routeDistKm || day.driving.approxKm || 0;
-      fuelCost = (km / 100) * carConsumption * fuelPrice;
+      // Inter-city km + in-city driving km
+      const totalKm = (day.driving.approxKm || 0) + inCityDriveKm;
+      fuelCost = (totalKm / 100) * carConsumption * fuelPrice;
       transportCost = fuelCost;
     } else if (dayTransportOverride.costPerPerson) {
       transportCost = dayTransportOverride.costPerPerson * partySize;
+      // Still add in-city driving fuel if applicable
+      if (inCityDriveKm > 0) {
+        fuelCost = (inCityDriveKm / 100) * carConsumption * fuelPrice;
+        transportCost += fuelCost;
+      }
     }
+  } else if (inCityDriveKm > 0) {
+    // Non-driving day but in-city mode is driving
+    fuelCost = (inCityDriveKm / 100) * carConsumption * fuelPrice;
+    transportCost = fuelCost;
   }
   const dayAcc = getEffectiveAcc(day.date);
   const accEdit = dayAcc ? (State.accEdits[dayAcc.id] || {}) : {};
@@ -631,8 +643,28 @@ function calcDayMetrics(dayIndex, routeDistKm) {
     suggestions.push({ type: 'action', text: 'This day looks great! 🌟', poiId: null });
   }
 
+  // Build detailed cost explanation for tooltip
+  const costLines = [];
+  if (poiEntryCost > 0) {
+    const perPerson = pois.reduce((s, p) => { const a = parseFloat(p.costAmount); return s + (isNaN(a) ? 0 : a); }, 0);
+    costLines.push(`Entries: €${perPerson.toFixed(0)}/person × ${partySize} = €${poiEntryCost.toFixed(0)}`);
+  } else {
+    costLines.push('Entries: Free');
+  }
+  costLines.push(`Meals: €${dailyMealBudget}/person × ${partySize} people = €${mealsCost.toFixed(0)}`);
+  if (day.driving && transportType === 'driving') {
+    const interKm = day.driving.approxKm || 0;
+    costLines.push(`Fuel: ${interKm}${inCityDriveKm > 0 ? '+' + inCityDriveKm.toFixed(0) : ''} km × ${carConsumption}L/100km × €${fuelPrice}/L = €${fuelCost.toFixed(0)}`);
+  } else if (transportCost > 0) {
+    costLines.push(`Transport: €${(dayTransportOverride.costPerPerson || 0)}/person × ${partySize} = €${(dayTransportOverride.costPerPerson || 0) * partySize}`);
+  }
+  if (accCost > 0) costLines.push(`Accommodation: €${accCost.toFixed(0)}/night`);
+  costLines.push(`Total: €${totalCost.toFixed(0)}`);
+  const costExplain = costLines.join('\n');
+
   return {
     cost: { poi: poiEntryCost, meals: mealsCost, fuel: fuelCost, transport: transportCost, acc: accCost, total: totalCost },
+    costExplain,
     tiredness: { raw: tirednessRaw, score: tirednessScore, norm: tirednessNorm, level: tirednessLevel, color: tirednessColor, emoji: tirednessEmoji },
     familyFriendly,
     logisticalFriction,
@@ -841,7 +873,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
 
   const html = `
     <div class="metrics-row-main">
-      <div class="metric-pill cost-pill" title="Estimated day cost: entries €${metrics.cost.poi.toFixed(0)} + meals €${metrics.cost.meals.toFixed(0)}${metrics.cost.transport > 0 ? ` + transport €${metrics.cost.transport.toFixed(0)}` : ''}${metrics.cost.acc > 0 ? ` + accommodation €${metrics.cost.acc.toFixed(0)}` : ''}">💰 €${metrics.cost.total.toFixed(0)}</div>
+      <div class="metric-pill cost-pill" title="${esc(metrics.costExplain)}">💰 €${metrics.cost.total.toFixed(0)}</div>
       <div class="metric-pill tiredness-pill tiredness-${tirednessLevelClass}" title="Tiredness: ${metrics.tiredness.norm.toFixed(1)}/10 — based on walking distance, activity durations, and ages in your party">${metrics.tiredness.emoji} ${metrics.tiredness.level}</div>
       <div class="metric-pill overall-pill" title="Overall day score: ${metrics.overall.toFixed(1)}/10 — weighted average of family fit, culture, food, relaxation, fun, and logistics">⭐ ${metrics.overall.toFixed(1)}/10</div>
     </div>
