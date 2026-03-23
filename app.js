@@ -1843,6 +1843,9 @@ async function openDetail(poiId) {
   const poi = getPoi(poiId);
   if (!poi) return;
   State.detailPoiId = poiId;
+  // Hide layer controls so they don't overlap the close button
+  const lc = document.getElementById('layer-controls');
+  if (lc) lc.style.display = 'none';
 
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
   const inPlan = isPoiInPlan(poiId);
@@ -1924,6 +1927,8 @@ async function openDetail(poiId) {
 function closeDetail() {
   State.detailPoiId = null;
   document.getElementById('poi-detail').classList.remove('open');
+  const lc = document.getElementById('layer-controls');
+  if (lc) lc.style.display = '';
 }
 
 // ─── Layer Controls ────────────────────────────────────────────
@@ -3097,42 +3102,108 @@ function savePoiEdit(poiId) {
   showToast('Place updated');
 }
 
+function parseImportData(text) {
+  const places = [];
+  const trimmed = text.trim();
+
+  // Try JSON first
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const raw = JSON.parse(trimmed);
+      // Google Takeout GeoJSON
+      if (raw.type === 'FeatureCollection' && Array.isArray(raw.features)) {
+        raw.features.forEach(f => {
+          const name = f.properties?.Title || f.properties?.name || 'Unnamed';
+          const coords = f.geometry?.coordinates;
+          if (!coords || coords.length < 2) return;
+          const [lng, lat] = coords;
+          places.push({ name, lat, lng, address: f.properties?.Location?.Address || f.properties?.address || '', gmapsUrl: f.properties?.['Google Maps URL'] || '' });
+        });
+        return { places, format: 'Google Maps Takeout' };
+      }
+      // Mapstr export (JSON array with name + address + coordinates)
+      if (Array.isArray(raw) && raw[0]?.name) {
+        raw.forEach(item => {
+          const lat = parseFloat(item.lat ?? item.latitude ?? item.coordinates?.lat);
+          const lng = parseFloat(item.lng ?? item.lon ?? item.longitude ?? item.coordinates?.lng ?? item.coordinates?.lon);
+          if (item.name && !isNaN(lat) && !isNaN(lng)) {
+            places.push({ name: item.name, lat, lng, address: item.address || item.location || '', gmapsUrl: item.gmapsUrl || item.url || '' });
+          }
+        });
+        return { places, format: 'JSON array' };
+      }
+      // GeoJSON with geometry
+      if (raw.type === 'Feature' && raw.geometry) {
+        const [lng, lat] = raw.geometry.coordinates || [];
+        if (lat && lng) places.push({ name: raw.properties?.name || 'Imported', lat, lng, address: '', gmapsUrl: '' });
+        return { places, format: 'GeoJSON Feature' };
+      }
+    } catch { /* not JSON, try other formats */ }
+  }
+
+  // KML format
+  if (trimmed.includes('<kml') || trimmed.includes('<Placemark')) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(trimmed, 'text/xml');
+    doc.querySelectorAll('Placemark').forEach(pm => {
+      const name = pm.querySelector('name')?.textContent?.trim() || 'Unnamed';
+      const coordStr = pm.querySelector('coordinates')?.textContent?.trim();
+      if (!coordStr) return;
+      const [lng, lat] = coordStr.split(',').map(Number);
+      if (isNaN(lat) || isNaN(lng)) return;
+      const desc = pm.querySelector('description')?.textContent?.trim() || '';
+      places.push({ name, lat, lng, address: desc, gmapsUrl: '' });
+    });
+    return { places, format: 'KML' };
+  }
+
+  // CSV format: name,lat,lng[,address] or with headers
+  const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length >= 2) {
+    const delim = lines[0].includes('\t') ? '\t' : ',';
+    const header = lines[0].toLowerCase().split(delim).map(h => h.trim().replace(/"/g, ''));
+    const nameIdx = header.findIndex(h => h === 'name' || h === 'title' || h === 'place');
+    const latIdx  = header.findIndex(h => h === 'lat' || h === 'latitude');
+    const lngIdx  = header.findIndex(h => h === 'lng' || h === 'lon' || h === 'longitude' || h === 'long');
+    const addrIdx = header.findIndex(h => h === 'address' || h === 'location');
+
+    if (nameIdx >= 0 && latIdx >= 0 && lngIdx >= 0) {
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
+        const lat = parseFloat(cols[latIdx]);
+        const lng = parseFloat(cols[lngIdx]);
+        if (cols[nameIdx] && !isNaN(lat) && !isNaN(lng)) {
+          places.push({ name: cols[nameIdx], lat, lng, address: addrIdx >= 0 ? (cols[addrIdx] || '') : '', gmapsUrl: '' });
+        }
+      }
+      return { places, format: 'CSV' };
+    }
+    // Try headerless CSV: name,lat,lng
+    for (let i = 0; i < lines.length; i++) {
+      const cols = lines[i].split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
+      if (cols.length >= 3) {
+        const lat = parseFloat(cols[1]);
+        const lng = parseFloat(cols[2]);
+        if (cols[0] && !isNaN(lat) && !isNaN(lng)) {
+          places.push({ name: cols[0], lat, lng, address: cols[3] || '', gmapsUrl: '' });
+        }
+      }
+    }
+    if (places.length > 0) return { places, format: 'CSV (no header)' };
+  }
+
+  return { places: [], format: null };
+}
+
 function importPois() {
   const ta = document.getElementById('import-json');
   const preview = document.getElementById('import-preview');
   if (!ta) return;
 
-  let raw;
-  try { raw = JSON.parse(ta.value); }
-  catch (e) {
-    if (preview) preview.innerHTML = `<div class="import-error">❌ Invalid JSON: ${esc(e.message)}</div>`;
-    return;
-  }
+  const { places, format } = parseImportData(ta.value);
 
-  const places = [];
-
-  // Google Takeout format
-  if (raw.type === 'FeatureCollection' && Array.isArray(raw.features)) {
-    raw.features.forEach(f => {
-      const name = f.properties?.Title || f.properties?.name || 'Unnamed';
-      const coords = f.geometry?.coordinates;
-      if (!coords || coords.length < 2) return;
-      const [lng, lat] = coords;
-      const address = f.properties?.Location?.Address || f.properties?.address || '';
-      const gmapsUrl = f.properties?.['Google Maps URL'] || f.properties?.url || '';
-      places.push({ name, lat, lng, address, gmapsUrl });
-    });
-  }
-  // Simple array format
-  else if (Array.isArray(raw)) {
-    raw.forEach(item => {
-      if (item.name && item.lat != null && item.lng != null) {
-        places.push({ name: item.name, lat: Number(item.lat), lng: Number(item.lng), address: item.address || '', gmapsUrl: item.gmapsUrl || '' });
-      }
-    });
-  }
-  else {
-    if (preview) preview.innerHTML = `<div class="import-error">❌ Unrecognized format. Expected Google Takeout FeatureCollection or array of {name, lat, lng}.</div>`;
+  if (!format) {
+    if (preview) preview.innerHTML = `<div class="import-error">❌ Unrecognized format. Supports: Google Maps Takeout, KML, CSV (name,lat,lng), Mapstr JSON, or GeoJSON.</div>`;
     return;
   }
 
@@ -3191,7 +3262,7 @@ function importPois() {
   placeMarkers();
   renderDayPlanContent(State.selectedDayIndex);
   closeImportModal();
-  showToast(`Imported ${imported} place${imported !== 1 ? 's' : ''}`);
+  showToast(`Imported ${imported} place${imported !== 1 ? 's' : ''} (${format})`);
 }
 
 // ─── Trip Selector ─────────────────────────────────────────────
@@ -3590,24 +3661,23 @@ function injectModals() {
       </div>
       <div class="modal-body">
         <div class="import-instructions">
-          <p><strong>From Google Maps Saved Places:</strong></p>
-          <ol>
-            <li>Go to <a href="https://takeout.google.com" target="_blank" rel="noopener">takeout.google.com</a></li>
-            <li>Select "Google Maps" → "Saved Places"</li>
-            <li>Download and extract the ZIP</li>
-            <li>Open <code>Takeout/Maps/Saved Places.json</code></li>
-            <li>Paste the JSON content below</li>
-          </ol>
-          <p style="margin-top:8px;font-size:11px;color:var(--color-text-secondary);">Also supports a simple array of <code>{"name","lat","lng","address"}</code> objects.</p>
+          <p><strong>Supported formats:</strong></p>
+          <div style="font-size:12px;color:var(--color-text-secondary);line-height:1.6;">
+            📍 <strong>Google Maps</strong> — Takeout → Maps → Saved Places.json<br>
+            📍 <strong>KML</strong> — Google Earth / My Maps export (.kml)<br>
+            📍 <strong>CSV</strong> — name, lat, lng [, address] with or without header<br>
+            📍 <strong>Mapstr</strong> — JSON export from Mapstr app<br>
+            📍 <strong>GeoJSON</strong> — FeatureCollection or Feature
+          </div>
         </div>
-        <textarea id="import-json" class="import-textarea" placeholder="Paste Google Takeout JSON here..."></textarea>
+        <textarea id="import-json" class="import-textarea" placeholder="Paste content here (JSON, KML, or CSV)…"></textarea>
         <div id="import-preview"></div>
       </div>
       <div class="modal-actions" style="flex-wrap:wrap;gap:6px;">
         <button class="modal-btn" style="background:var(--color-card-bg);border:1px solid var(--color-border);color:var(--color-text-secondary);margin-right:auto;"
           onclick="App.importPlanFile()" title="Load a previously exported plan .json file">📁 Import Plan File</button>
         <button class="modal-btn modal-btn-cancel" onclick="App.closeImportModal()">Cancel</button>
-        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import Google Maps</button>
+        <button class="modal-btn modal-btn-save" onclick="App.importPois()">Import</button>
       </div>
     </div>
   </div>

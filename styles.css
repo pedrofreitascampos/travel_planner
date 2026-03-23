@@ -1019,6 +1019,7 @@ html, body {
   color: white;
   font-size: 16px;
   cursor: pointer;
+  z-index: 500;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1905,12 +1906,19 @@ html, body {
   /* Hide desktop sidebar */
   #sidebar { display: none; }
 
-  /* Header buttons: smaller text on mobile */
-  #btn-settings, #btn-trip-overview, #btn-import {
+  /* Header buttons: smaller on mobile */
+  #app-header button {
     padding: 4px 7px !important;
-    font-size: 16px !important;
+    font-size: 14px !important;
   }
-  #btn-reset-plan { padding: 4px 8px; font-size: 11px; }
+  #btn-reset-plan { font-size: 10px !important; }
+
+  /* Tighter transport / acc cards on mobile */
+  .transport-type-group { gap: 2px; }
+  .transport-type-btn { padding: 2px 5px; font-size: 12px; }
+  .acc-picker-select { max-width: 140px; font-size: 11px; }
+  .drive-info { padding: 6px 8px; gap: 6px; }
+  .btn-move-day { width: 28px; font-size: 11px; }
 
   /* ─── Bottom Sheet ──────────────────────────────────────── */
   #bottom-sheet {
