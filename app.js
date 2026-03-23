@@ -95,6 +95,8 @@ const State = {
   weatherCache: {},       // cacheKey → weather object or null
   thumbnailCache: {},     // title → url or null
   routePolyline: null,
+  interCityPolyline: null,
+  lastInterCityResult: null,
   markers: {},            // poiId → L.Marker
   accMarkers: [],
   map: null,
@@ -112,6 +114,7 @@ const State = {
   accEdits: {},           // accId → { name, notes, pricePerNight, lat, lng }
   dayAccAssignments: {},  // 'YYYY-MM-DD' → accId override
   dayTransport: {},       // 'YYYY-MM-DD' → { type, costPerPerson, durationMin }
+  dayRouteMode: {},       // 'YYYY-MM-DD' → 'foot' | 'driving'
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -131,6 +134,7 @@ const Storage = {
         selectedDayIndex: State.selectedDayIndex,
         dayAccAssignments: State.dayAccAssignments,
         dayTransport: State.dayTransport,
+        dayRouteMode: State.dayRouteMode,
       }));
     } catch (e) { /* quota exceeded — ignore */ }
   },
@@ -432,7 +436,8 @@ function calcDayMetrics(dayIndex, routeDistKm) {
   const maxMult = getMaxAgeMultiplier();
   const youngest = getYoungestAge();
   const { fuelPrice, carConsumption, dailyMealBudget } = State.settings;
-  const walkKm = (routeDistKm != null && State.layers.routeMode === 'foot') ? routeDistKm : 0;
+  const dayMode = getEffectiveRouteMode(day.date);
+  const walkKm = (routeDistKm != null && dayMode === 'foot') ? routeDistKm : 0;
 
   // ── Cost ──────────────────────────────────────────────────────
   const poiEntryCost = pois.reduce((sum, p) => {
@@ -995,6 +1000,7 @@ function fitMapToDay(dayIndex) {
 
 async function drawRoute(dayIndex) {
   if (!State.map) return;
+  drawInterCityRoute(dayIndex); // fire-and-forget inter-city route
   if (State.routePolyline) {
     State.map.removeLayer(State.routePolyline);
     State.routePolyline = null;
@@ -1011,7 +1017,8 @@ async function drawRoute(dayIndex) {
     return;
   }
 
-  const result = await fetchRoute(waypoints, State.layers.routeMode);
+  const dayMode = getEffectiveRouteMode(day.date);
+  const result = await fetchRoute(waypoints, dayMode);
   if (!result) {
     updateRouteSummaryUI(null);
     renderDayMetricsUI(dayIndex, 0);
@@ -1025,7 +1032,7 @@ async function drawRoute(dayIndex) {
         color: getDayColor(dayIndex),
         weight: 4,
         opacity: 0.75,
-        dashArray: State.layers.routeMode === 'foot' ? '8,4' : null,
+        dashArray: dayMode === 'foot' ? '8,4' : null,
       },
     }).addTo(State.map);
   } else {
@@ -1040,6 +1047,47 @@ async function drawRoute(dayIndex) {
   updateRouteSummaryUI(result);
   // Update metrics with actual walking/driving distance
   renderDayMetricsUI(dayIndex, result.distKm);
+}
+
+// ─── Inter-City Route ──────────────────────────────────────────
+async function drawInterCityRoute(dayIndex) {
+  if (State.interCityPolyline) {
+    State.map.removeLayer(State.interCityPolyline);
+    State.interCityPolyline = null;
+  }
+  State.lastInterCityResult = null;
+
+  const day = getDay(dayIndex);
+  if (!day?.driving || !State.map) return;
+
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? getEffectiveAcc(prevDate) : null;
+  const arrAcc = getEffectiveAcc(day.date);
+  if (!depAcc || !arrAcc) return;
+
+  const depC = getAccCoords(depAcc);
+  const arrC = getAccCoords(arrAcc);
+  const result = await fetchRoute([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], 'driving');
+  if (!result) return;
+  State.lastInterCityResult = result;
+
+  if (result.geojson) {
+    State.interCityPolyline = L.geoJSON(result.geojson, {
+      style: {
+        color: '#4a6fa5',
+        weight: 5,
+        opacity: 0.35,
+        dashArray: '10,6',
+      },
+    }).addTo(State.map);
+  } else {
+    State.interCityPolyline = L.polyline([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], {
+      color: '#4a6fa5',
+      weight: 4,
+      opacity: 0.3,
+      dashArray: '10,6',
+    }).addTo(State.map);
+  }
 }
 
 // ─── Weather Loading ───────────────────────────────────────────
@@ -1115,13 +1163,22 @@ function updateRouteSummaryUI(result) {
   document.querySelectorAll('.route-summary').forEach(el => {
     if (!result) { el.style.display = 'none'; return; }
     el.style.display = 'flex';
-    const modeIcon = State.layers.routeMode === 'foot' ? '🚶' : '🚗';
+    const currentDay = getDay(State.selectedDayIndex);
+    const dayMode = currentDay ? getEffectiveRouteMode(currentDay.date) : State.layers.routeMode;
+    const modeIcon = dayMode === 'foot' ? '🚶' : '🚗';
     const fallback = result.isFallback ? ' (est.)' : '';
+    const date = currentDay?.date || '';
     el.innerHTML = `
       <div class="route-stat"><span class="stat-icon">${modeIcon}</span>
         <span class="stat-value">${formatDuration(result.durMin)}${fallback}</span></div>
       <div class="route-stat"><span class="stat-icon">📍</span>
-        <span class="stat-value">${formatDist(result.distKm)}</span></div>`;
+        <span class="stat-value">${formatDist(result.distKm)}</span></div>
+      <div class="route-mode-toggle">
+        <button class="route-mode-sm${dayMode === 'foot' ? ' active' : ''}"
+          onclick="App.setDayRouteMode('${date}','foot')">🚶</button>
+        <button class="route-mode-sm${dayMode === 'driving' ? ' active' : ''}"
+          onclick="App.setDayRouteMode('${date}','driving')">🚗</button>
+      </div>`;
   });
 }
 
@@ -1162,13 +1219,17 @@ function renderDayPlanContent(dayIndex) {
     { type: 'flight',  icon: '✈️', label: 'Flight' },
     { type: 'train',   icon: '🚂', label: 'Train' },
     { type: 'bus',     icon: '🚌', label: 'Bus' },
-    { type: 'ferry',   icon: '⛴️', label: 'Ferry' },
   ];
   const dayTransport = State.dayTransport[day.date] || {};
   const tType  = dayTransport.type || 'driving';
   const tInfo  = TRANSPORT_TYPES.find(t => t.type === tType) || TRANSPORT_TYPES[0];
-  const estFlightMin = Math.ceil((day.driving?.approxKm || 0) / 800 * 60) + 90;
-  const displayMin = tType === 'flight' ? (dayTransport.durationMin || estFlightMin) : day.driving?.approxMin;
+  const km = day.driving?.approxKm || 0;
+  const estSpeeds = { driving: null, flight: 800, train: 150, bus: 60 };
+  let displayMin;
+  if (dayTransport.durationMin) displayMin = dayTransport.durationMin;
+  else if (tType === 'flight')  displayMin = Math.ceil(km / 800 * 60) + 90;
+  else if (tType === 'driving') displayMin = day.driving?.approxMin;
+  else                          displayMin = Math.ceil(km / (estSpeeds[tType] || 80) * 60);
   const costPerPersonField = tType !== 'driving' ? `
     <div class="transport-cost-row">
       <span class="transport-cost-label">€/person:</span>
@@ -1187,7 +1248,7 @@ function renderDayPlanContent(dayIndex) {
       <div class="drive-info-icon">${tInfo.icon}</div>
       <div class="drive-info-text">
         <div class="drive-info-label">${esc(day.driving.from)} → ${esc(day.driving.to)}</div>
-        <div class="drive-info-detail">~${formatDuration(displayMin)} · ${day.driving.approxKm} km · ${esc(day.driving.note)}</div>
+        <div class="drive-info-detail">${formatDuration(displayMin)} · ${day.driving.approxKm} km</div>
       </div>
       <div class="transport-type-group">
         ${typeButtons}
@@ -1220,22 +1281,8 @@ function renderDayPlanContent(dayIndex) {
     </div>`;
   };
 
-  // Acc picker for tonight (shown at bottom of plan)
-  const accs = State.trip.accommodations.filter(a => !a.isHome);
-  const todayAccId = dayAcc?.id || '';
-  const accPickerHtml = `
-    <div class="acc-picker-row">
-      <span class="acc-picker-label">🏨 Tonight:</span>
-      <select class="acc-picker-select" onchange="App.setDayAcc('${day.date}', this.value)">
-        <option value="">— none —</option>
-        ${accs.map(a => {
-          const edit = State.accEdits[a.id] || {};
-          const name = edit.name || a.name;
-          return `<option value="${a.id}"${a.id === todayAccId ? ' selected' : ''}>${esc(name)}</option>`;
-        }).join('')}
-      </select>
-      ${dayAcc && !dayAcc.isHome ? `<button class="btn-icon btn-edit-sm" onclick="App.openAccEditModal('${dayAcc.id}')" title="Edit">✏️</button>` : ''}
-    </div>`;
+  // "Tonight" card — always shown (on non-driving days there's no depart/arrive)
+  const tonightAccHtml = (!day.driving && dayAcc) ? accCardHtml(dayAcc, 'Tonight') : '';
 
   // Build POI cards
   const poiCardsHtml = plan.length === 0
@@ -1272,7 +1319,7 @@ function renderDayPlanContent(dayIndex) {
         ${poiCardsHtml}
       </div>
       ${accCardHtml(arrivalAcc, 'Arrive')}
-      ${accPickerHtml}
+      ${tonightAccHtml}
     </div>
 
     <div class="add-more-section">
@@ -2019,6 +2066,17 @@ function closeImportModal() {
   if (modal) modal.classList.add('hidden');
 }
 
+// ─── Per-Day Route Mode ─────────────────────────────────────────
+function getEffectiveRouteMode(date) {
+  return State.dayRouteMode[date] || State.layers.routeMode;
+}
+
+function setDayRouteMode(date, mode) {
+  State.dayRouteMode[date] = mode;
+  Storage.save();
+  drawRoute(State.selectedDayIndex);
+}
+
 // ─── Day Accommodation & Transport ─────────────────────────────
 function setDayAcc(date, accId) {
   if (accId) State.dayAccAssignments[date] = accId;
@@ -2064,6 +2122,20 @@ function openAccEditModal(accId) {
   } else {
     badge.style.display = 'none';
   }
+  // Populate nights assignment checkboxes
+  const nightsEl = document.getElementById('ae-nights-list');
+  if (nightsEl && State.trip) {
+    nightsEl.innerHTML = State.trip.days.map(d => {
+      const currentAcc = getEffectiveAcc(d.date);
+      const isAssigned = currentAcc?.id === accId;
+      return `<label class="ae-night-toggle${isAssigned ? ' active' : ''}">
+        <input type="checkbox" data-date="${d.date}" ${isAssigned ? 'checked' : ''}
+          onchange="App.setDayAcc('${d.date}', this.checked ? '${accId}' : '')">
+        <span>${formatShortDate(d.date)}</span>
+      </label>`;
+    }).join('');
+  }
+
   document.getElementById('acc-edit-modal').classList.remove('hidden');
 }
 
@@ -2524,33 +2596,50 @@ async function discoverAlongRoute(dayIndex) {
   document.querySelectorAll('.route-discover-results').forEach(el => {
     el.innerHTML = '<div class="discover-loading">🔍 Searching along route…</div>';
   });
-  // Use route midpoint if available, otherwise midpoint between origin and destination accommodations
-  let midLat, midLng;
-  const geojsonCoords = State.lastRouteResult?.geojson?.coordinates;
-  if (geojsonCoords?.length >= 2) {
-    const [mLng, mLat] = geojsonCoords[Math.floor(geojsonCoords.length / 2)];
-    midLat = mLat; midLng = mLng;
+
+  // Sample 3-4 evenly spaced points along the inter-city route
+  const coords = State.lastInterCityResult?.geojson?.coordinates;
+  let samplePoints = [];
+  if (coords?.length >= 4) {
+    // Sample at 25%, 50%, 75% of the route
+    [0.25, 0.5, 0.75].forEach(pct => {
+      const idx = Math.floor(coords.length * pct);
+      const [lng, lat] = coords[idx];
+      samplePoints.push({ lat, lng });
+    });
   } else {
-    // Fall back: midpoint between departure and arrival accommodations
-    const depAcc = State.trip?.accommodations.find(a =>
-      a.location?.toLowerCase().includes(day.driving.from?.toLowerCase()));
-    const arrAcc = State.trip?.accommodations.find(a =>
-      a.location?.toLowerCase().includes(day.driving.to?.toLowerCase()));
-    if (!depAcc || !arrAcc) { showToast('Load the route first for better results'); return; }
-    const depCoords = getAccCoords(depAcc);
-    const arrCoords = getAccCoords(arrAcc);
-    midLat = (depCoords.lat + arrCoords.lat) / 2;
-    midLng = (depCoords.lng + arrCoords.lng) / 2;
+    // Fallback: midpoint between departure and arrival accommodations
+    const prevDate = State.trip.days[dayIndex - 1]?.date;
+    const depAcc = prevDate ? getEffectiveAcc(prevDate) : null;
+    const arrAcc = getEffectiveAcc(day.date);
+    if (!depAcc || !arrAcc) { showToast('Wait for the route to load, or set accommodations'); return; }
+    const d = getAccCoords(depAcc), a = getAccCoords(arrAcc);
+    samplePoints = [{ lat: (d.lat + a.lat) / 2, lng: (d.lng + a.lng) / 2 }];
   }
+
   const radiusM = (State.settings.routeDiscoveryRadius || 3) * 1000;
-  const elements = await overpassQuery(midLat, midLng, radiusM);
-  if (!elements) {
+  const queries = samplePoints.map(p => overpassQuery(p.lat, p.lng, radiusM));
+  const results = await Promise.allSettled(queries);
+
+  // Merge + deduplicate by name
+  const seen = new Set();
+  const allElements = [];
+  for (const r of results) {
+    if (r.status !== 'fulfilled' || !r.value) continue;
+    for (const el of r.value) {
+      const key = el.tags?.name?.toLowerCase();
+      if (key && !seen.has(key)) { seen.add(key); allElements.push(el); }
+    }
+  }
+
+  if (!allElements.length) {
     document.querySelectorAll('.route-discover-results').forEach(el => {
-      el.innerHTML = '<div class="discover-empty">Discovery service unavailable. Try again.</div>';
+      el.innerHTML = '<div class="discover-empty">No places found along route. Try increasing the radius in settings.</div>';
     });
     return;
   }
-  renderDiscoverResults(elements, '.route-discover-results', midLat, midLng, dayIndex);
+  const mid = samplePoints[Math.floor(samplePoints.length / 2)];
+  renderDiscoverResults(allElements, '.route-discover-results', mid.lat, mid.lng, dayIndex);
 }
 
 // ─── POI Edit Modal ─────────────────────────────────────────────
@@ -3050,12 +3139,14 @@ function loadTrip(tripId) {
     );
     State.dayAccAssignments = saved.dayAccAssignments ?? {};
     State.dayTransport = saved.dayTransport ?? {};
+    State.dayRouteMode = saved.dayRouteMode ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
     State.selectedDayIndex = 0;
     State.dayAccAssignments = {};
     State.dayTransport = {};
+    State.dayRouteMode = {};
   }
 
   // Load party config and settings
@@ -3208,6 +3299,10 @@ function injectModals() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="ae-acc-id">
+        <div class="settings-field">
+          <label class="settings-label">Assign to nights</label>
+          <div id="ae-nights-list" class="ae-nights-list"></div>
+        </div>
         <div class="settings-field">
           <label class="settings-label">Search for hotel / accommodation</label>
           <input type="text" id="ae-search" class="settings-input" placeholder="🔍 Type to search…"
@@ -3561,6 +3656,7 @@ window.App = {
   pePreviewIcon,
   savePoiEdit,
   setDayAcc,
+  setDayRouteMode,
   setTransportType,
   setTransportCost,
   openAccEditModal,
