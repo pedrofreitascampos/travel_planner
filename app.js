@@ -939,16 +939,17 @@ function initMap(lat, lng) {
     zoomControl: true,
   });
 
-  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom: 19,
-  });
-  const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri, Maxar, Earthstar Geographics',
-    maxZoom: 19,
-  });
-  osmLayer.addTo(State.map);
-  L.control.layers({ 'Map': osmLayer, 'Satellite': satLayer }, null, { position: 'topright' }).addTo(State.map);
+  State.mapLayers = {
+    osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }),
+    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '© Esri, Maxar, Earthstar Geographics',
+      maxZoom: 19,
+    }),
+  };
+  State.mapLayers.osm.addTo(State.map);
 
   // Custom marker mode: click on map to drop a pin
   State.map.on('click', e => {
@@ -1912,6 +1913,20 @@ function setRouteMode(mode) {
   });
   State.lastRouteResult = null;
   drawRoute(State.selectedDayIndex);
+}
+
+function setMapStyle(style) {
+  if (!State.map || !State.mapLayers) return;
+  if (style === 'satellite') {
+    State.map.removeLayer(State.mapLayers.osm);
+    State.mapLayers.satellite.addTo(State.map);
+  } else {
+    State.map.removeLayer(State.mapLayers.satellite);
+    State.mapLayers.osm.addTo(State.map);
+  }
+  document.querySelectorAll('[data-style]').forEach(b => {
+    b.classList.toggle('active', b.dataset.style === style);
+  });
 }
 
 function syncLayerUI() {
@@ -3849,6 +3864,7 @@ window.App = {
   toggleLayer,
   toggleCategory,
   setRouteMode,
+  setMapStyle,
   resetPlan,
   loadTrip,
   openSettingsModal,
