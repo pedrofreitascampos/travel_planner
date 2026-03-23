@@ -1577,7 +1577,7 @@ function renderDayPlanContent(dayIndex) {
         </div>
         <div class="search-results-host"></div>
 
-        <!-- Suggestions (nearby + along route) -->
+        <!-- Suggestions -->
         <div class="discover-group">
           <div class="discover-group-label">
             💡 Suggestions ·
@@ -1592,10 +1592,6 @@ function renderDayPlanContent(dayIndex) {
               <option value="entertainment">🎢 Entertainment</option>
               <option value="nature">🌿 Nature</option>
             </select>
-            ·
-            <input type="number" class="discover-radius-input" min="1" max="50" step="1"
-              value="${State.settings.discoveryRadius}"
-              onchange="App.setDiscoveryRadius(this.value)" title="Search radius in km"> km
             <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
           </div>
           <div class="nearby-discover-results">
@@ -3044,31 +3040,30 @@ async function discoverNearby(dayIndex, categoryFilter) {
 
 async function discoverAlongRoute(dayIndex) {
   const day = getDay(dayIndex);
-  if (!day?.driving) return;
+  if (!day) return;
   document.querySelectorAll('.route-discover-results').forEach(el => {
     el.innerHTML = '<div class="discover-loading">🔍 Searching along route…</div>';
   });
 
-  // Sample 3-4 evenly spaced points along the inter-city route
+  // Sample 7 evenly spaced points along the inter-city route for better coverage
   const coords = State.lastInterCityResult?.geojson?.coordinates;
   let samplePoints = [];
+  const samplePcts = [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9];
   if (coords?.length >= 4) {
-    // Sample at 25%, 50%, 75% of the route
-    [0.25, 0.5, 0.75].forEach(pct => {
-      const idx = Math.floor(coords.length * pct);
+    samplePcts.forEach(pct => {
+      const idx = Math.min(Math.floor(coords.length * pct), coords.length - 1);
       const [lng, lat] = coords[idx];
       samplePoints.push({ lat, lng });
     });
   } else {
-    // Fallback: sample between departure and arrival accommodations
+    // Fallback: interpolate between departure and arrival accommodations
     const prevDate = State.trip.days[dayIndex - 1]?.date;
     const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
     let arrAcc = getEffectiveAcc(day.date);
     if (arrAcc && depAcc && arrAcc.id === depAcc.id) arrAcc = getHomeAcc();
     if (!depAcc || !arrAcc) { showToast('Set accommodations for departure and arrival first'); return; }
     const d = getAccCoords(depAcc), a = getAccCoords(arrAcc);
-    // Sample 3 points between departure and arrival
-    [0.25, 0.5, 0.75].forEach(f => {
+    samplePcts.forEach(f => {
       samplePoints.push({ lat: d.lat + (a.lat - d.lat) * f, lng: d.lng + (a.lng - d.lng) * f });
     });
   }
