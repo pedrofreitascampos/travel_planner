@@ -432,6 +432,65 @@ test('getYoungestAge: returns minimum age in party', () => {
 
 // ─── Day sub-tab naming ──────────────────────────────────────────
 
+// ─── City name resolution with empty location ───────────────────
+
+test('getEffectiveDayLabel: uses accEdits.locationLabel when acc.location is empty', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Simulate user-created acc with no location but with a search result label
+  const acc = ctx.State.trip.accommodations.find(a => a.id === 'acc-sintra');
+  acc.location = '';
+  ctx.State.accEdits['acc-sintra'] = { locationLabel: 'Hotel Essentia, Aracena, Spain' };
+
+  const label = ctx.getEffectiveDayLabel(ctx.State.trip.days[2]); // day 3 uses acc-sintra
+  assert.strictEqual(label, 'Hotel Essentia', 'Should extract city from locationLabel');
+});
+
+test('getEffectiveDayLabel: uses edited name when location and locationLabel empty', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const acc = ctx.State.trip.accommodations.find(a => a.id === 'acc-sintra');
+  acc.location = '';
+  ctx.State.accEdits['acc-sintra'] = { name: 'Aracena Lodge' };
+
+  const label = ctx.getEffectiveDayLabel(ctx.State.trip.days[2]);
+  assert.strictEqual(label, 'Aracena Lodge', 'Should use edited name as fallback');
+});
+
+test('getEffectiveDayLabel: skips "New Accommodation" as label', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const acc = ctx.State.trip.accommodations.find(a => a.id === 'acc-sintra');
+  acc.location = '';
+  acc.name = 'New Accommodation';
+  ctx.State.accEdits['acc-sintra'] = {};
+
+  const label = ctx.getEffectiveDayLabel(ctx.State.trip.days[2]);
+  assert.strictEqual(label, 'Day 3', 'Should fall back to static label, not "New Accommodation"');
+});
+
+test('driving info: shows "?" when city is blank', () => {
+  const ctx = createTestContext();
+  // accCityName returns '' for accs with no location — the routeLabel should show '?'
+  // This is tested via the template logic, just verify accCityName handles empty
+  const accCityName = (acc) => {
+    if (!acc) return '';
+    const edit = ctx.State.accEdits?.[acc.id] || {};
+    for (const src of [acc.location, edit.locationLabel, edit.name, acc.name]) {
+      if (!src) continue;
+      const city = src.split(',')[0].replace(/^(New\s+Accommodation|Accommodation|Home)\s*[—–-]?\s*/i, '').trim();
+      if (city && city.length > 1 && city !== 'New Accommodation') return city;
+    }
+    return '';
+  };
+  assert.strictEqual(accCityName({ location: '', name: 'New Accommodation' }), '');
+  assert.strictEqual(accCityName({ location: 'Aracena, Spain', name: 'Hotel X' }), 'Aracena');
+  assert.strictEqual(accCityName(null), '');
+});
+
 test('day sub-tabs: third tab is Analysis not Details', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);

@@ -1445,11 +1445,15 @@ async function drawInterCityRoute(dayIndex) {
 // ─── Effective Day Label ────────────────────────────────────────
 function getEffectiveDayLabel(day) {
   if (State.dayLabels?.[day.date]) return State.dayLabels[day.date];
-  // Derive ONLY from accommodation's .location field (the city/place), never the acc name
   const acc = getEffectiveAcc(day.date);
-  if (acc?.location) {
-    const city = acc.location.split(',')[0].trim();
-    if (city && city.length > 1) return city;
+  if (acc) {
+    // Try location field, then locationLabel from edits, then edited name
+    const edit = State.accEdits?.[acc.id] || {};
+    for (const src of [acc.location, edit.locationLabel, edit.name, acc.name]) {
+      if (!src) continue;
+      const city = src.split(',')[0].replace(/^(New\s+Accommodation|Accommodation|Home)\s*[—–-]?\s*/i, '').trim();
+      if (city && city.length > 1 && city !== 'New Accommodation') return city;
+    }
   }
   return day.label;
 }
@@ -1591,17 +1595,23 @@ function renderDayPlanContent(dayIndex) {
 
   const accCityName = (acc) => {
     if (!acc) return '';
-    // Use ONLY the .location field (the city/place), not the acc name
-    if (acc.location) return acc.location.split(',')[0].trim();
+    const edit = State.accEdits?.[acc.id] || {};
+    // Try location, then locationLabel from search, then edited name
+    for (const src of [acc.location, edit.locationLabel, edit.name, acc.name]) {
+      if (!src) continue;
+      const city = src.split(',')[0].replace(/^(New\s+Accommodation|Accommodation|Home)\s*[—–-]?\s*/i, '').trim();
+      if (city && city.length > 1 && city !== 'New Accommodation') return city;
+    }
     return '';
   };
   const depCity = accCityName(departureAcc);
   const arrCity = accCityName(arrivalAcc);
+  const routeLabel = (depCity || arrCity) ? `${esc(depCity || '?')} → ${esc(arrCity || '?')}` : 'Travel day';
   const drivingHtml = hasInterCity ? `
     <div class="drive-info">
       <div class="drive-info-icon">🚗</div>
       <div class="drive-info-text">
-        <div class="drive-info-label">${esc(depCity)} → ${esc(arrCity)}</div>
+        <div class="drive-info-label">${routeLabel}</div>
         ${km > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
       </div>
     </div>` : '';
