@@ -2697,7 +2697,11 @@ function closeAccEditModal() {
     Storage.save();
     Storage.saveUserAccs(State.trip.id);
     _pendingNewAccId = null;
+    clearAllRoutes();
+    placeMarkers();
     renderAll();
+    drawRoute(State.selectedDayIndex);
+    renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   }
   document.getElementById('acc-edit-modal').classList.add('hidden');
 }
@@ -2720,8 +2724,11 @@ function deleteAccommodation() {
   Storage.saveUserAccs(State.trip.id);
   _pendingNewAccId = null;
   document.getElementById('acc-edit-modal').classList.add('hidden');
+  clearAllRoutes();
   placeMarkers();
   renderAll();
+  drawRoute(State.selectedDayIndex);
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   showToast('Accommodation deleted');
 }
 
@@ -2814,6 +2821,7 @@ function saveAccEdit() {
   renderAll();
   drawRoute(State.selectedDayIndex);
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
+  loadAndRenderWeatherAll(State.selectedDayIndex);
   showToast('Accommodation updated');
 }
 

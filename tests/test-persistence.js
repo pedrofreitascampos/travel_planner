@@ -348,6 +348,69 @@ test('savePoiEdit: calls Storage.savePoiEdits', () => {
   ctx.global.document.getElementById = origGetEl;
 });
 
+// ─── Accommodation change triggers full recalculation ────────────
+
+test('setDayAcc: calls clearAllRoutes + drawRoute + renderDayMetricsUI', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  let routeCleared = false;
+  let routeDrawn = false;
+  let metricsRendered = false;
+
+  const origClear = ctx.clearAllRoutes;
+  const origDraw = ctx.drawRoute;
+  const origMetrics = ctx.renderDayMetricsUI;
+  ctx.clearAllRoutes = () => { routeCleared = true; };
+  ctx.drawRoute = () => { routeDrawn = true; };
+  ctx.renderDayMetricsUI = () => { metricsRendered = true; };
+
+  ctx.setDayAcc('2026-06-01', 'acc-sintra');
+
+  assert.ok(routeCleared, 'clearAllRoutes should be called');
+  assert.ok(routeDrawn, 'drawRoute should be called');
+  assert.ok(metricsRendered, 'renderDayMetricsUI should be called');
+
+  ctx.clearAllRoutes = origClear;
+  ctx.drawRoute = origDraw;
+  ctx.renderDayMetricsUI = origMetrics;
+});
+
+test('deleteAccommodation: clears routes and recalculates metrics', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Add a user-created acc to delete
+  const acc = { id: 'acc-delete-me', name: 'Delete Me', location: 'Test', lat: 0, lng: 0, days: [], isUserCreated: true };
+  ctx.State.trip.accommodations.push(acc);
+  ctx.State.dayAccAssignments['2026-06-01'] = 'acc-delete-me';
+
+  let routeCleared = false;
+  let routeDrawn = false;
+  const origClear = ctx.clearAllRoutes;
+  const origDraw = ctx.drawRoute;
+  ctx.clearAllRoutes = () => { routeCleared = true; };
+  ctx.drawRoute = () => { routeDrawn = true; };
+
+  // Mock DOM for deleteAccommodation
+  const origGetEl = ctx.global.document.getElementById;
+  ctx.global.document.getElementById = (id) => {
+    if (id === 'ae-acc-id') return { value: 'acc-delete-me' };
+    if (id === 'acc-edit-modal') return { classList: { add() {} } };
+    return origGetEl(id);
+  };
+
+  ctx.deleteAccommodation();
+
+  assert.ok(routeCleared, 'clearAllRoutes should be called on delete');
+  assert.ok(routeDrawn, 'drawRoute should be called on delete');
+  assert.ok(!ctx.State.dayAccAssignments['2026-06-01'], 'Assignment should be removed');
+
+  ctx.clearAllRoutes = origClear;
+  ctx.drawRoute = origDraw;
+  ctx.global.document.getElementById = origGetEl;
+});
+
 test('loadPoiEdits: restores POI edits on trip load', async () => {
   const ctx = createTestContext();
   installMockTrip(ctx);
