@@ -1191,9 +1191,17 @@ function fitMapToDay(dayIndex) {
   if (!State.map || !State.trip) return;
   const day = getDay(dayIndex);
   if (!day) return;
-  const coords = (State.plan[day.date] || [])
-    .map(id => getPoi(id)).filter(Boolean)
-    .map(p => [p.lat, p.lng]);
+  const coords = [];
+  // Include departure accommodation
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  if (depAcc) { const c = getAccCoords(depAcc); if (c.lat && c.lng) coords.push([c.lat, c.lng]); }
+  // Include POIs
+  (State.plan[day.date] || []).map(id => getPoi(id)).filter(Boolean).forEach(p => coords.push([p.lat, p.lng]));
+  // Include arrival accommodation
+  const arrAcc = getEffectiveAcc(day.date);
+  if (arrAcc) { const c = getAccCoords(arrAcc); if (c.lat && c.lng) coords.push([c.lat, c.lng]); }
+
   if (coords.length === 0) return;
   if (coords.length === 1) {
     State.map.setView(coords[0], 13, { animate: true });
@@ -1266,6 +1274,8 @@ async function drawRoute(dayIndex) {
   updateRouteSummaryUI(result);
   // Update metrics with actual walking/driving distance
   renderDayMetricsUI(dayIndex, result.distKm);
+  // Fit map to show the full route including accommodations
+  fitMapToDay(dayIndex);
 }
 
 // ─── Inter-City Route ──────────────────────────────────────────
