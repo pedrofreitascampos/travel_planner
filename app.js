@@ -132,7 +132,10 @@ const DB = {
   async set(path, data) {
     try {
       await dbRef(path).set(data);
-    } catch (e) { console.error('DB set failed:', path, e); }
+    } catch (e) {
+      console.error('DB set failed:', path, e);
+      if (typeof showToast === 'function') showToast('⚠️ Save failed — check connection');
+    }
   },
   async remove(path) {
     try {
@@ -324,10 +327,10 @@ const Storage = {
     const edits = {};
     State.trip?.pois.forEach(p => {
       edits[p.id] = {
-        name: p.name, category: p.category, emoji: p.emoji,
-        duration: p.duration, costAmount: p.costAmount, costLabel: p.costLabel,
+        name: p.name, category: p.category, emoji: p.emoji || null,
+        duration: p.duration, cost: p.cost, costAmount: p.costAmount, costLabel: p.costLabel,
         kidsFriendly: p.kidsFriendly, kidsRating: p.kidsRating,
-        description: p.description, confirmedBooking: p.confirmedBooking,
+        description: p.description || '', confirmedBooking: p.confirmedBooking || false,
         bookingTime: p.bookingTime || '', bookingRef: p.bookingRef || '',
       };
     });
@@ -1794,7 +1797,6 @@ function buildPoiCardHtml(poiId, idx) {
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
   const isBooked = poi.confirmedBooking;
   const badges = [];
-  if (isBooked) badges.push('<span class="badge badge-confirmed">⭐ Booked</span>');
   if (poi.bookAhead && !isBooked) badges.push('<span class="badge badge-warning">⚠️ Book ahead</span>');
 
   return `<div class="poi-card${isBooked ? ' confirmed' : ''}" data-poi-id="${poiId}" draggable="true">
@@ -4079,7 +4081,7 @@ async function loadTrip(tripId) {
     if (edit.category) poi.category = edit.category;
     poi.emoji = edit.emoji ?? poi.emoji;
     if (edit.duration != null) poi.duration = edit.duration;
-    if (edit.costAmount != null) { poi.costAmount = edit.costAmount; poi.costLabel = edit.costLabel; }
+    if (edit.costAmount != null) { poi.costAmount = edit.costAmount; poi.costLabel = edit.costLabel; poi.cost = edit.cost ?? poi.cost; }
     if (edit.kidsFriendly != null) { poi.kidsFriendly = edit.kidsFriendly; poi.kidsRating = edit.kidsRating; }
     if (edit.description != null) poi.description = edit.description;
     poi.confirmedBooking = edit.confirmedBooking ?? poi.confirmedBooking;
