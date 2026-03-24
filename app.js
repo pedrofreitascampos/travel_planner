@@ -1452,6 +1452,11 @@ async function drawInterCityRoute(dayIndex) {
   } else {
     State.interCityPolyline = L.polyline([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], style).addTo(State.map);
   }
+
+  // Update the drive-info detail with actual OSRM distance/duration
+  document.querySelectorAll('.drive-info-detail').forEach(el => {
+    el.textContent = `${formatDuration(result.durMin)} · ${Math.round(result.distKm)} km`;
+  });
 }
 
 // ─── Effective Day Label ────────────────────────────────────────
