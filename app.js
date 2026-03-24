@@ -7,9 +7,8 @@
 
 // ─── Google Auth ──────────────────────────────────────────────
 // Replace with your Google OAuth Client ID
-const GOOGLE_CLIENT_ID = '__YOUR_GOOGLE_CLIENT_ID__';
-// Allowed emails — leave empty [] to allow anyone, or add specific emails
-const ALLOWED_EMAILS = []; // e.g. ['you@gmail.com', 'wife@gmail.com']
+const GOOGLE_CLIENT_ID = '1093754809418-r117ab5131s38f0a6d60stfmrm1r3rr7.apps.googleusercontent.com';
+const ALLOWED_EMAILS = ['pedrofreitascampos@gmail.com', 'faye.anson@gmail.com'];
 
 const Auth = {
   user: null, // { name, email, picture, credential }
@@ -38,13 +37,15 @@ const Auth = {
     document.getElementById('app').style.display = 'none';
     document.getElementById('bottom-sheet')?.style.setProperty('display', 'none');
 
-    // Render Google Sign-In button
-    if (window.google?.accounts?.id) {
-      Auth._renderButton();
-    } else {
-      // GIS library not loaded yet — wait for it
-      window.addEventListener('load', () => setTimeout(() => Auth._renderButton(), 200));
-    }
+    // Render Google Sign-In button — retry until GIS library is loaded
+    const tryRender = () => {
+      if (window.google?.accounts?.id) {
+        Auth._renderButton();
+      } else {
+        setTimeout(tryRender, 300);
+      }
+    };
+    tryRender();
   },
 
   _renderButton() {
@@ -4509,11 +4510,16 @@ window.App = {
 
 // ─── Initialization ────────────────────────────────────────────
 function init() {
-  // Auth gate — if no valid session, show sign-in and stop
-  if (GOOGLE_CLIENT_ID !== '__YOUR_GOOGLE_CLIENT_ID__') {
-    Auth.init();
-    if (!Auth.user) return; // will call init again after sign-in via showApp → reload
+  // Auth gate
+  if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== '__YOUR_GOOGLE_CLIENT_ID__') {
+    if (!Auth.user) {
+      Auth.init();
+      if (!Auth.user) return; // will call init() again after sign-in
+    }
   }
+  // Ensure app is visible (in case auth was skipped or already done)
+  document.getElementById('auth-gate').style.display = 'none';
+  document.getElementById('app').style.display = '';
 
   State.isMobile = window.innerWidth < 768;
 
