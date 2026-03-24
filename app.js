@@ -4509,6 +4509,8 @@ window.App = {
 };
 
 // ─── Initialization ────────────────────────────────────────────
+let _appBooted = false;
+
 function init() {
   // Auth gate
   if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== '__YOUR_GOOGLE_CLIENT_ID__') {
@@ -4517,14 +4519,15 @@ function init() {
       if (!Auth.user) return; // will call init() again after sign-in
     }
   }
-  // Ensure app is visible (in case auth was skipped or already done)
+  // Ensure app is visible
   document.getElementById('auth-gate').style.display = 'none';
   document.getElementById('app').style.display = '';
 
-  State.isMobile = window.innerWidth < 768;
-
-  // Inject modals into DOM
-  injectModals();
+  // Only inject DOM elements once (modals, header buttons, listeners)
+  if (!_appBooted) {
+    _appBooted = true;
+    State.isMobile = window.innerWidth < 768;
+    injectModals();
   // Inject header buttons
   injectHeaderButtons();
   // Check for ?share= URL param (must be after modals are injected)
@@ -4567,6 +4570,8 @@ function init() {
       document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
     }
   });
+
+  } // end of one-time boot
 
   // Merge user-created trips from localStorage into the live registry
   Storage.loadUserTrips().forEach(t => {
