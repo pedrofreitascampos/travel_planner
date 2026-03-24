@@ -1776,13 +1776,14 @@ function buildPoiCardHtml(poiId, idx) {
     <div class="drag-handle" title="Drag to reorder">⠿</div>
     <div class="poi-thumb" id="pt-${poiId}"><span class="thumb-fallback">${cat.icon}</span></div>
     <div class="poi-info">
-      <div class="poi-card-name" title="${esc(poi.name)}">${esc(poi.name)}${poi.rating ? ` <span class="poi-stars">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : ''}</div>
+      <div class="poi-card-name" title="${esc(poi.name)}">${esc(poi.name)}</div>
       <div class="poi-card-meta">
         ${getCostHtml(poi)}
         <span class="badge badge-duration">⏱ ${poi.duration}h</span>
         ${poi.confirmedBooking && poi.bookingTime ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || 'Booked')}">🕐 ${esc(poi.bookingTime)}</span>` : poi.confirmedBooking ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || '')}">✅ Booked</span>` : ''}
         ${badges.join('')}
       </div>
+      ${poi.rating ? `<div class="poi-stars" title="Rating: ${poi.rating}/5">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</div>` : ''}
       <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
     </div>
     <div class="poi-actions">

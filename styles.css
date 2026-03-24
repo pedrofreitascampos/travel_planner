@@ -818,7 +818,7 @@ html, body {
 }
 .btn-move-day:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
-.poi-stars { font-size: 10px; color: #f0c040; letter-spacing: 0.5px; vertical-align: middle; }
+.poi-stars { font-size: 11px; color: #f0c040; letter-spacing: 0.5px; line-height: 1; }
 
 /* ─── Add More Section ────────────────────────────────────────── */
 .add-more-section {
