@@ -1190,7 +1190,7 @@ function placeMarkers() {
   const addedAccIds = new Set();
   State.trip.accommodations.forEach(acc => {
     if (addedAccIds.has(acc.id)) return;
-    if (!acc.days.some(d => shownDateArr.includes(d))) return;
+    if (!(acc.days || []).some(d => shownDateArr.includes(d))) return;
     addedAccIds.add(acc.id);
     const { lat: aLat, lng: aLng } = getAccCoords(acc);
     const m = L.marker([aLat, aLng], { icon: makeAccIcon() })
@@ -2860,7 +2860,7 @@ function getEffectiveAcc(date) {
   if (!State.trip) return null;
   const override = State.dayAccAssignments[date];
   if (override) return State.trip.accommodations.find(a => a.id === override) || null;
-  return State.trip.accommodations.find(a => a.days.includes(date)) || null;
+  return State.trip.accommodations.find(a => (a.days || []).includes(date)) || null;
 }
 
 // Returns effective lat/lng for an accommodation, respecting any user edits
@@ -4074,6 +4074,7 @@ async function loadTrip(tripId) {
   State.accEdits = await Storage.loadAccEdits(tripId);
   const userAccs = await Storage.loadUserAccs(tripId);
   userAccs.forEach(acc => {
+    acc.days = acc.days || []; // Firebase returns null for empty arrays
     if (!State.trip.accommodations.find(a => a.id === acc.id)) {
       State.trip.accommodations.push(acc);
     }

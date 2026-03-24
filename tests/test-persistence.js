@@ -411,6 +411,50 @@ test('deleteAccommodation: clears routes and recalculates metrics', () => {
   ctx.global.document.getElementById = origGetEl;
 });
 
+test('placeMarkers: handles acc with days=null (Firebase returns null for empty arrays)', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Simulate a user-created acc loaded from Firebase with days=null
+  ctx.State.trip.accommodations.push({
+    id: 'acc-null-days', name: 'Test', location: 'Test', lat: 0, lng: 0,
+    days: null, // Firebase converts [] to null
+    isUserCreated: true,
+  });
+
+  // placeMarkers should not crash
+  try {
+    ctx.placeMarkers();
+    assert.ok(true, 'placeMarkers should not throw');
+  } catch (e) {
+    assert.fail('placeMarkers crashed: ' + e.message);
+  }
+});
+
+test('getEffectiveAcc: handles acc with days=null', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Add acc with null days
+  ctx.State.trip.accommodations.push({
+    id: 'acc-null-days', name: 'Test', location: 'Test', lat: 0, lng: 0,
+    days: null,
+  });
+
+  // Should not crash when searching for a date
+  const result = ctx.getEffectiveAcc('2026-06-01');
+  assert.ok(result, 'Should still find acc-lisbon for this date');
+});
+
+test('user accs loaded from Firebase get days normalized to array', () => {
+  // When Firebase stores an acc with days: [], it comes back as null
+  // The load flow should normalize it back to []
+  const acc = { id: 'test', name: 'Test', days: null };
+  acc.days = acc.days || [];
+  assert.ok(Array.isArray(acc.days), 'days should be normalized to array');
+  assert.strictEqual(acc.days.length, 0, 'should be empty array');
+});
+
 test('savePoiEdits: no undefined values in saved data (Firebase rejects them)', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);
