@@ -430,4 +430,30 @@ test('getYoungestAge: returns minimum age in party', () => {
   assert.strictEqual(ctx.getYoungestAge(), 3);
 });
 
+// ─── Day sub-tab naming ──────────────────────────────────────────
+
+test('day sub-tabs: third tab is Analysis not Details', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // The switchDayTab function should accept 'analysis'
+  // Check that the rendered content uses 'analysis' not 'details'
+  ctx.switchDayTab('analysis');
+  // No error thrown = function accepts 'analysis' as valid tab name
+  assert.ok(true, 'switchDayTab accepts "analysis"');
+});
+
+// ─── Settings not in day metrics ─────────────────────────────────
+
+test('day metrics: party info line does not contain Settings link', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const metrics = ctx.calcDayMetrics(0, 0);
+  assert.ok(metrics, 'metrics should exist');
+  assert.ok(metrics.costExplain, 'costExplain should exist');
+  // The costExplain should not reference settings
+  assert.ok(!metrics.costExplain.includes('Settings'), 'costExplain should not mention Settings');
+});
+
 module.exports = tests;

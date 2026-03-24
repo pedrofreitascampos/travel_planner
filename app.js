@@ -96,10 +96,18 @@ const Auth = {
     badge.onclick = () => {
       if (confirm('Sign out?')) Auth.signOut();
     };
+    // Settings button
+    const settingsBtn = document.createElement('button');
+    settingsBtn.id = 'btn-header-settings';
+    settingsBtn.title = 'Settings';
+    settingsBtn.textContent = '⚙️';
+    settingsBtn.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;';
+    settingsBtn.onclick = () => App.openSettingsModal();
+
     const header = document.getElementById('app-header');
     const spacer = header?.querySelector('.header-spacer');
-    if (spacer) spacer.after(badge);
-    else header?.appendChild(badge);
+    if (spacer) { spacer.after(settingsBtn); settingsBtn.after(badge); }
+    else { header?.appendChild(settingsBtn); header?.appendChild(badge); }
   },
 
   signOut() {
@@ -1006,7 +1014,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
       <div class="metric-pill overall-pill" title="Overall day score: ${metrics.overall.toFixed(1)}/10 — weighted average of family fit, culture, food, relaxation, fun, and logistics">⭐ ${metrics.overall.toFixed(1)}/10</div>
     </div>
     <div class="party-info-line">
-      👨‍👩‍👧‍👦 ${esc(partyDesc)}${esc(kidsStr)} · <a href="#" onclick="event.preventDefault();App.openSettingsModal()" class="party-settings-link">Settings</a>
+      👨‍👩‍👧‍👦 ${esc(partyDesc)}${esc(kidsStr)}
     </div>
     <div class="metrics-details-inner">
         <div class="metric-section">
@@ -1678,7 +1686,7 @@ function renderDayPlanContent(dayIndex) {
     <div class="day-subtabs">
       <button class="day-subtab active" data-tab="plan" onclick="App.switchDayTab('plan')">📋 Plan</button>
       <button class="day-subtab" data-tab="discover" onclick="App.switchDayTab('discover')">🔍 Discover</button>
-      <button class="day-subtab" data-tab="details" onclick="App.switchDayTab('details')">📊 Details</button>
+      <button class="day-subtab" data-tab="analysis" onclick="App.switchDayTab('details')">📊 Analysis</button>
     </div>
 
     <!-- TAB: Plan -->
@@ -1734,7 +1742,7 @@ function renderDayPlanContent(dayIndex) {
     </div>
 
     <!-- TAB: Details -->
-    <div class="day-tab-panel" data-panel="details" style="display:none">
+    <div class="day-tab-panel" data-panel="analysis" style="display:none">
       <div class="day-metrics-widget"></div>
     </div>
 
