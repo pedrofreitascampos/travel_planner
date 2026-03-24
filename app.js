@@ -1043,6 +1043,8 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
   document.querySelectorAll('.day-metrics-widget').forEach(el => {
     el.innerHTML = html;
   });
+  // Keep trip overview in sync
+  updateTripOverviewContent();
 }
 
 // ─── Map Setup ─────────────────────────────────────────────────
@@ -2432,15 +2434,11 @@ function saveSettings() {
 }
 
 // ─── Trip Overview Modal ───────────────────────────────────────
-function openTripOverviewModal() {
-  const modal = document.getElementById('trip-overview-modal');
-  if (!modal) return;
-
-  const tripMetrics = calcTripMetrics();
-  if (!tripMetrics) return;
-
+function updateTripOverviewContent() {
   const content = document.getElementById('trip-overview-content');
   if (!content) return;
+  const tripMetrics = calcTripMetrics();
+  if (!tripMetrics) return;
 
   const bestDay = getDay(tripMetrics.bestDayIdx);
   const worstDay = getDay(tripMetrics.worstDayIdx);
@@ -2512,6 +2510,12 @@ function openTripOverviewModal() {
     ${suggestionsHtml}
   `;
 
+}
+
+function openTripOverviewModal() {
+  const modal = document.getElementById('trip-overview-modal');
+  if (!modal) return;
+  updateTripOverviewContent();
   modal.classList.remove('hidden');
 }
 
