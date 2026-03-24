@@ -2730,7 +2730,6 @@ function accLocationSearch(inputEl) {
       // Search globally for lodging/accommodations — no bounded restriction
       const params = new URLSearchParams({
         format: 'json', limit: '6', q, addressdetails: '1',
-        featuretype: 'settlement',
       });
       const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`,
         { headers: { 'Accept-Language': 'en' } });
@@ -2739,7 +2738,8 @@ function accLocationSearch(inputEl) {
       resultsEl.innerHTML = results.map(r => {
         const name = r.name || r.display_name.split(',')[0];
         const addr = r.display_name.split(',').slice(1, 3).join(',').trim();
-        return `<div class="ae-search-result" onclick="App.selectAccLocation(${r.lat}, ${r.lon}, '${esc(name)}', '${esc(addr)}')">
+        return `<div class="ae-search-result" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${esc(name)}" data-addr="${esc(addr)}"
+          onclick="App.selectAccLocation(+this.dataset.lat, +this.dataset.lon, this.dataset.name, this.dataset.addr)">
           <span class="ae-result-name">${esc(name)}</span>
           <span class="ae-result-addr">${esc(addr)}</span>
         </div>`;
@@ -2762,9 +2762,12 @@ function selectAccLocation(lat, lng, name, addr) {
   badge.style.display = '';
   document.getElementById('ae-search').value = '';
   document.getElementById('ae-search-results').innerHTML = '';
-  // Store label for re-opening
+  // Store location (city from addr) and display label separately
   if (!State._aePendingLabel) State._aePendingLabel = {};
   State._aePendingLabel[accId] = label;
+  if (!State._aePendingLocation) State._aePendingLocation = {};
+  // Use addr as location (e.g. "Aracena, Spain") — this is the city, not the hotel name
+  State._aePendingLocation[accId] = addr || name;
 }
 
 function saveAccEdit() {
@@ -2784,15 +2787,15 @@ function saveAccEdit() {
     ...(coordsChanged ? { lat, lng } : {}),
     ...(State._aePendingLabel?.[accId] ? { locationLabel: State._aePendingLabel[accId] } : {}),
   };
-  // Update the accommodation's location from search result or name
+  // Update accommodation location and name
   if (acc) {
     const editedName = State.accEdits[accId].name;
-    if (State._aePendingLabel?.[accId]) {
-      acc.location = State._aePendingLabel[accId];
+    if (State._aePendingLocation?.[accId]) {
+      // Search was used — set location to city/addr (e.g. "Aracena, Spain"), not hotel name
+      acc.location = State._aePendingLocation[accId];
     } else if (!acc.location && editedName) {
       acc.location = editedName;
     }
-    // Also update the acc name from edits
     if (editedName) acc.name = editedName;
   }
   Storage.saveAccEdits(State.trip.id);

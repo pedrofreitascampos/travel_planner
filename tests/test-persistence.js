@@ -198,6 +198,8 @@ test('saveAccEdit: updates acc.location from search result label', () => {
 
   if (!ctx.State._aePendingLabel) ctx.State._aePendingLabel = {};
   ctx.State._aePendingLabel['acc-sintra'] = 'Hotel Essentia, Aracena, Spain';
+  if (!ctx.State._aePendingLocation) ctx.State._aePendingLocation = {};
+  ctx.State._aePendingLocation['acc-sintra'] = 'Aracena, Spain';
 
   const mockModal = { classList: { add() {}, remove() {} } };
   const mockDom = {
@@ -214,7 +216,7 @@ test('saveAccEdit: updates acc.location from search result label', () => {
 
   ctx.saveAccEdit();
 
-  assert.strictEqual(acc.location, 'Hotel Essentia, Aracena, Spain', 'acc.location should be set from search label');
+  assert.strictEqual(acc.location, 'Aracena, Spain', 'acc.location should be city from search, not hotel name');
   assert.strictEqual(acc.name, 'Hotel Essentia', 'acc.name should be updated from edit');
   ctx.global.document.getElementById = origGetEl;
 });
