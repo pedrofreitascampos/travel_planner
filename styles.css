@@ -1921,7 +1921,7 @@ html, body {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  background: linear-gradient(135deg, #1a1a2e 0%, #1b2838 30%, #1a2744 50%, #1e2a4a 70%, #0f3460 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1931,7 +1931,7 @@ html, body {
   padding: 40px;
 }
 .auth-logo { font-size: 64px; margin-bottom: 12px; }
-.auth-title { font-size: 28px; font-weight: 800; color: white; letter-spacing: -0.5px; }
+.auth-title { font-size: 32px; font-weight: 800; color: white; letter-spacing: 1px; }
 .auth-subtitle { font-size: 14px; color: rgba(255,255,255,0.55); margin: 8px 0 28px; }
 #g-signin-btn { display: flex; justify-content: center; }
 
