@@ -1682,6 +1682,13 @@ function renderDayPlanContent(dayIndex) {
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
 
+  // Collapse same-location accommodations into a single line
+  const sameLocation = departureAcc && arrivalAcc && departureAcc.id === arrivalAcc.id;
+  const accSummaryHtml = sameLocation
+    ? `<div class="acc-card"><div class="acc-icon">🏨</div><div class="acc-info"><div class="acc-name">${esc((State.accEdits[arrivalAcc.id]?.name || arrivalAcc.name))}</div></div>
+        <button class="btn-icon btn-edit-sm" onclick="App.openAccEditModal('${arrivalAcc.id}')">✏️</button></div>`
+    : `${departCardHtml}${arriveCardHtml}`;
+
   const contentHtml = `
     <div class="day-header">
       <div class="day-header-top">
@@ -1700,70 +1707,70 @@ function renderDayPlanContent(dayIndex) {
       ${drivingHtml}
     </div>
 
-    <div class="day-metrics-widget"></div>
+    <!-- Sub-tabs: Plan / Discover / Details -->
+    <div class="day-subtabs">
+      <button class="day-subtab active" data-tab="plan" onclick="App.switchDayTab('plan')">📋 Plan</button>
+      <button class="day-subtab" data-tab="discover" onclick="App.switchDayTab('discover')">🔍 Discover</button>
+      <button class="day-subtab" data-tab="details" onclick="App.switchDayTab('details')">📊 Details</button>
+    </div>
 
-    <div class="route-summary" style="display:none"></div>
-
-    <div class="poi-list-section">
-      <div class="section-label">Today's Plan</div>
-      ${departCardHtml}
+    <!-- TAB: Plan -->
+    <div class="day-tab-panel" data-panel="plan">
+      <div class="route-summary" style="display:none"></div>
+      ${accSummaryHtml}
       <div class="poi-list" data-day="${dayIndex}">
         ${poiCardsHtml}
       </div>
-      ${arriveCardHtml}
     </div>
 
-    <div class="add-more-section">
-      <div class="add-more-header">
-        <div class="add-more-title">Add places</div>
+    <!-- TAB: Discover -->
+    <div class="day-tab-panel" data-panel="discover" style="display:none">
+      <div class="discover-search-wrap">
+        <input class="poi-search-input" type="text" placeholder="🔍 Search for a place…"
+          oninput="App.searchPois(this, ${dayIndex})">
       </div>
-      <div class="add-more-list">
+      <div class="search-results-host"></div>
 
-        <!-- Search -->
-        <div class="discover-search-wrap">
-          <input class="poi-search-input" type="text" placeholder="🔍 Search for a place…"
-            oninput="App.searchPois(this, ${dayIndex})">
+      <div class="discover-group">
+        <div class="discover-group-label">
+          💡 Suggestions ·
+          <select class="discover-cat-filter" onchange="App.discoverNearby(${dayIndex}, this.value)">
+            <option value="all">All types</option>
+            <option value="food">🍽️ Restaurants</option>
+            <option value="bar">🍷 Bars & Cafés</option>
+            <option value="monument">🏛️ Monuments</option>
+            <option value="museum">🎨 Museums</option>
+            <option value="park">🌳 Parks</option>
+            <option value="beach">🏖️ Beaches</option>
+            <option value="entertainment">🎢 Entertainment</option>
+            <option value="nature">🌿 Nature</option>
+          </select>
+          <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
         </div>
-        <div class="search-results-host"></div>
-
-        <!-- Suggestions -->
-        <div class="discover-group">
-          <div class="discover-group-label">
-            💡 Suggestions ·
-            <select class="discover-cat-filter" onchange="App.discoverNearby(${dayIndex}, this.value)">
-              <option value="all">All types</option>
-              <option value="food">🍽️ Restaurants</option>
-              <option value="bar">🍷 Bars & Cafés</option>
-              <option value="monument">🏛️ Monuments</option>
-              <option value="museum">🎨 Museums</option>
-              <option value="park">🌳 Parks</option>
-              <option value="beach">🏖️ Beaches</option>
-              <option value="entertainment">🎢 Entertainment</option>
-              <option value="nature">🌿 Nature</option>
-            </select>
-            <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
-          </div>
-          <div class="nearby-discover-results">
-            ${addMoreHtml || '<div class="discover-empty">Click Load to discover places nearby</div>'}
-          </div>
+        <div class="nearby-discover-results">
+          ${addMoreHtml || '<div class="discover-empty">Click Load to discover places nearby</div>'}
         </div>
-
-        ${hasInterCity ? `
-        <!-- Along the route -->
-        <div class="discover-group">
-          <div class="discover-group-label">
-            🛣️ Along the route ·
-            <input type="number" class="discover-radius-input" min="1" max="50" step="1"
-              value="${State.settings.routeDiscoveryRadius}"
-              onchange="App.setRouteDiscoveryRadius(this.value)" title="Search radius in km"> km
-            <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">Load</button>
-          </div>
-          <div class="route-discover-results"></div>
-        </div>` : ''}
-
       </div>
+
+      ${hasInterCity ? `
+      <div class="discover-group">
+        <div class="discover-group-label">
+          🛣️ Along the route ·
+          <input type="number" class="discover-radius-input" min="1" max="50" step="1"
+            value="${State.settings.routeDiscoveryRadius}"
+            onchange="App.setRouteDiscoveryRadius(this.value)" title="Search radius in km"> km
+          <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">Load</button>
+        </div>
+        <div class="route-discover-results"></div>
+      </div>` : ''}
     </div>
-    <div style="height:24px"></div>
+
+    <!-- TAB: Details -->
+    <div class="day-tab-panel" data-panel="details" style="display:none">
+      <div class="day-metrics-widget"></div>
+    </div>
+
+    <div style="height:16px"></div>
   `;
 
   document.querySelectorAll('.plan-content-host').forEach(el => {
@@ -2518,6 +2525,11 @@ function closeImportModal() {
 // ─── Per-Day Route Mode ─────────────────────────────────────────
 function getEffectiveRouteMode(date) {
   return State.dayRouteMode[date] || State.layers.routeMode;
+}
+
+function switchDayTab(tabName) {
+  document.querySelectorAll('.day-subtab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+  document.querySelectorAll('.day-tab-panel').forEach(p => p.style.display = p.dataset.panel === tabName ? '' : 'none');
 }
 
 function saveDayEmoji(date, text) {
@@ -4538,6 +4550,7 @@ window.App = {
   pePreviewIcon,
   savePoiEdit,
   setDayAcc,
+  switchDayTab,
   saveDayLabel,
   saveDayEmoji,
   setDiscoveryRadius,
