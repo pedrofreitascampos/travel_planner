@@ -3877,7 +3877,7 @@ function showTripSelector(trips) {
   // Update header: show close button only when a trip is already loaded
   const titleEl = el.querySelector('.trip-selector-title');
   if (titleEl) {
-    titleEl.innerHTML = `🌈 My Trips ${hasActiveTrip
+    titleEl.innerHTML = `✦ My Trips ${hasActiveTrip
       ? `<button class="ts-close-btn" onclick="App.closeTripSelector()" title="Close">×</button>`
       : ''}`;
   }

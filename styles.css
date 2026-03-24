@@ -2003,7 +2003,11 @@ html, body {
   position: relative;
   z-index: 1;
 }
-.auth-logo { font-size: 64px; margin-bottom: 12px; }
+.auth-logo {
+  font-size: 72px;
+  margin-bottom: 12px;
+  text-shadow: 0 0 20px rgba(255,200,100,0.4), 0 0 60px rgba(138,43,226,0.2);
+}
 .auth-title {
   font-size: 32px;
   font-weight: 800;
