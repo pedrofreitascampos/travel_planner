@@ -1601,9 +1601,13 @@ function renderDayPlanContent(dayIndex) {
   if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id && day.driving) arrivalAcc = getHomeAcc();
   const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
 
-  // Transport info (driving only)
-  const km = day.driving?.approxKm || 0;
-  const displayMin = day.driving?.approxMin || 0;
+  // Transport info — estimate distance from acc coords if no trip driving data
+  let km = day.driving?.approxKm || 0;
+  if (!km && hasInterCity && departureAcc && arrivalAcc) {
+    const dc = getAccCoords(departureAcc), ac = getAccCoords(arrivalAcc);
+    if (dc.lat && dc.lng && ac.lat && ac.lng) km = Math.round(haversineKm(dc.lat, dc.lng, ac.lat, ac.lng) * 1.3);
+  }
+  const displayMin = day.driving?.approxMin || (km > 0 ? Math.round(km / 80 * 60) : 0);
 
   const accCityName = (acc) => {
     if (!acc) return '';
@@ -1624,7 +1628,7 @@ function renderDayPlanContent(dayIndex) {
       <div class="drive-info-icon">🚗</div>
       <div class="drive-info-text">
         <div class="drive-info-label">${routeLabel}</div>
-        ${km > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
+        ${km > 0 || displayMin > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
       </div>
     </div>` : '';
 
