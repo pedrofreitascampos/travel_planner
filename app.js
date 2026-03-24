@@ -247,7 +247,7 @@ const State = {
     fuelPrice: 1.70,
     carConsumption: 7.5,
     dailyMealBudget: 22,
-    discoveryRadius: 5,       // km — nearby POI discovery
+    discoveryRadius: 10,      // km — nearby POI discovery
     routeDiscoveryRadius: 5,  // km — along-route discovery
   },
   importedPois: [],       // POIs imported from Google Maps
@@ -1211,8 +1211,9 @@ function fitMapToDay(dayIndex) {
   if (depAcc) { const c = getAccCoords(depAcc); if (c.lat && c.lng) coords.push([c.lat, c.lng]); }
   // Include POIs
   (State.plan[day.date] || []).map(id => getPoi(id)).filter(Boolean).forEach(p => coords.push([p.lat, p.lng]));
-  // Include arrival accommodation
-  const arrAcc = getEffectiveAcc(day.date);
+  // Include arrival accommodation (resolve to home if same as departure on driving days)
+  let arrAcc = getEffectiveAcc(day.date);
+  if (arrAcc && depAcc && arrAcc.id === depAcc.id && day.driving) arrAcc = getHomeAcc();
   if (arrAcc) { const c = getAccCoords(arrAcc); if (c.lat && c.lng) coords.push([c.lat, c.lng]); }
 
   if (coords.length === 0) return;
@@ -1707,7 +1708,7 @@ function renderDayPlanContent(dayIndex) {
     <div class="day-subtabs">
       <button class="day-subtab active" data-tab="plan" onclick="App.switchDayTab('plan')">📋 Plan</button>
       <button class="day-subtab" data-tab="discover" onclick="App.switchDayTab('discover')">🔍 Discover</button>
-      <button class="day-subtab" data-tab="analysis" onclick="App.switchDayTab('details')">📊 Analysis</button>
+      <button class="day-subtab" data-tab="analysis" onclick="App.switchDayTab('analysis')">📊 Analysis</button>
     </div>
 
     <!-- TAB: Plan -->
@@ -3199,7 +3200,7 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
       }
       return 0;
     })
-    .slice(0, 20);
+    .slice(0, 30);
 
   // Place markers on map for discovered results
   clearDiscoveryMarkers();
