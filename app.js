@@ -1156,11 +1156,11 @@ function placeMarkers() {
       if (!State.layers.categories[poi.category]) return;
       const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
       const icon = L.divIcon({
-        html: `<div style="width:26px;height:26px;border-radius:50%;background:${cat.color};border:2px solid rgba(255,255,255,0.7);box-shadow:0 1px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:13px;opacity:0.45;">${cat.icon}</div>`,
+        html: `<div style="width:22px;height:22px;border-radius:50%;background:${cat.color};border:2px solid rgba(255,255,255,0.7);box-shadow:0 1px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:11px;opacity:0.3;">${cat.icon}</div>`,
         className: '',
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
-        popupAnchor: [0, -14],
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+        popupAnchor: [0, -12],
       });
       const m = L.marker([poi.lat, poi.lng], { icon })
         .addTo(State.map)
@@ -1697,11 +1697,10 @@ function renderDayPlanContent(dayIndex) {
     </div>
 
     <div class="add-more-section">
-      <div class="add-more-header" onclick="App.toggleAddMore(this)">
+      <div class="add-more-header">
         <div class="add-more-title">Add places</div>
-        <div class="add-more-toggle">▼</div>
       </div>
-      <div class="add-more-list" style="display:none">
+      <div class="add-more-list">
 
         <!-- Search -->
         <div class="discover-search-wrap">
@@ -2002,15 +2001,8 @@ function togglePoiInPlan(poiId) {
   closeDetail();
 }
 
-// ─── Add More Toggle ───────────────────────────────────────────
-function toggleAddMore(headerEl) {
-  const list = headerEl.nextElementSibling;
-  const toggle = headerEl.querySelector('.add-more-toggle');
-  if (!list) return;
-  const open = list.style.display !== 'none';
-  list.style.display = open ? 'none' : 'block';
-  if (toggle) toggle.style.transform = open ? '' : 'rotate(180deg)';
-}
+// ─── Add More Toggle (no-op — section is always visible) ──────
+function toggleAddMore() {}
 
 // ─── Refresh Day ───────────────────────────────────────────────
 function refreshDay(dayIndex, redrawRoute = false) {
@@ -3615,6 +3607,55 @@ function deleteUserTrip(tripId) {
   showToast('Trip deleted');
 }
 
+function renameUserTrip(tripId, btnEl) {
+  const card = btnEl.closest('.trip-card');
+  if (!card) return;
+  const nameEl = card.querySelector('.trip-card-name');
+  if (!nameEl) return;
+  const oldName = nameEl.textContent.trim();
+
+  // Replace the name element with an input
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'trip-card-name-input';
+  input.value = oldName;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const newName = input.value.trim() || oldName;
+    // Restore the name element
+    const span = document.createElement('div');
+    span.className = 'trip-card-name';
+    span.textContent = newName;
+    input.replaceWith(span);
+
+    if (newName !== oldName) {
+      // Update in registry
+      const trip = window._tripRegistry.find(t => t.id === tripId);
+      if (trip) trip.name = newName;
+      // Persist
+      const userTrips = Storage.loadUserTrips();
+      const ut = userTrips.find(t => t.id === tripId);
+      if (ut) { ut.name = newName; Storage.saveUserTrips(userTrips); }
+      // Update header if this is the active trip
+      if (State.trip?.id === tripId) {
+        State.trip.name = newName;
+        const titleEl = document.querySelector('.header-title');
+        if (titleEl) titleEl.textContent = newName;
+      }
+      showToast('Trip renamed');
+    }
+  };
+
+  input.onblur = commit;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = oldName; input.blur(); }
+  };
+}
+
 function createUserTrip(formData) {
   const slug = formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const id = `user-${slug}-${Date.now()}`;
@@ -3853,6 +3894,8 @@ function showTripSelector(trips) {
         <div class="trip-card-meta">${t.pois?.length ?? 0} places · ${t.days?.length ?? 0} days</div>
       </div>
       ${t.isUserCreated ? `
+        <button class="trip-card-rename" title="Rename trip"
+          onclick="event.stopPropagation(); App.renameUserTrip('${esc(t.id)}', this)">✏️</button>
         <button class="trip-card-delete" title="Delete trip"
           onclick="event.stopPropagation(); App.deleteUserTrip('${esc(t.id)}')">×</button>
       ` : ''}
@@ -4379,9 +4422,6 @@ function injectHeaderButtons() {
     titleWrap.onclick = () => showTripSelector(tripRegistry._arr);
   }
 
-  // Find the reset button to insert before it
-  const resetBtn = document.getElementById('btn-reset-plan');
-
   // "Drop a pin" button — togglable
   const btnPin = document.createElement('button');
   btnPin.id = 'btn-add-marker';
@@ -4418,19 +4458,11 @@ function injectHeaderButtons() {
   btnSettings.onclick = () => App.openSettingsModal();
   btnSettings.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
 
-  if (resetBtn) {
-    header.insertBefore(btnPin, resetBtn);
-    header.insertBefore(btnImport, resetBtn);
-    header.insertBefore(btnShare, resetBtn);
-    header.insertBefore(btnOverview, resetBtn);
-    header.insertBefore(btnSettings, resetBtn);
-  } else {
-    header.appendChild(btnPin);
-    header.appendChild(btnImport);
-    header.appendChild(btnShare);
-    header.appendChild(btnOverview);
-    header.appendChild(btnSettings);
-  }
+  header.appendChild(btnPin);
+  header.appendChild(btnImport);
+  header.appendChild(btnShare);
+  header.appendChild(btnOverview);
+  header.appendChild(btnSettings);
 }
 
 // ─── Public API ────────────────────────────────────────────────
@@ -4447,7 +4479,6 @@ window.App = {
   toggleCategory,
   setRouteMode,
   setMapStyle,
-  resetPlan,
   loadTrip,
   openSettingsModal,
   closeSettingsModal,
@@ -4460,6 +4491,7 @@ window.App = {
   importPois,
   closeTripSelector,
   deleteUserTrip,
+  renameUserTrip,
   importBooking,
   openNewTripForm,
   closeNewTripForm,

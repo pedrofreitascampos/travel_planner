@@ -78,18 +78,6 @@ html, body {
 .header-subtitle { font-size: 11px; color: rgba(255,255,255,0.55); }
 .header-spacer { flex: 1; }
 
-#btn-reset-plan {
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.18);
-  color: rgba(255,255,255,0.85);
-  padding: 5px 11px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background var(--trans-fast);
-  white-space: nowrap;
-}
-#btn-reset-plan:hover { background: rgba(255,255,255,0.2); }
 
 #btn-settings:hover, #btn-trip-overview:hover, #btn-import:hover {
   background: rgba(255,255,255,0.2) !important;
@@ -472,11 +460,16 @@ html, body {
   justify-content: center;
   align-items: center;
   margin: 8px 0 4px;
+  overflow: visible;
 }
 
 .radar-chart-container svg {
   max-width: 100%;
   height: auto;
+  overflow: visible;
+}
+.radar-chart-container svg text {
+  overflow: visible;
 }
 
 /* ─── Suggestions ─────────────────────────────────────────────── */
@@ -675,8 +668,8 @@ html, body {
 .poi-card {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 8px 8px;
+  gap: 7px;
+  padding: 5px 6px;
   background: white;
   border-radius: var(--radius-md);
   border: 1.5px solid var(--color-border);
@@ -803,7 +796,6 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  cursor: pointer;
   padding: 4px 0 8px;
 }
 
@@ -816,9 +808,7 @@ html, body {
 }
 
 .add-more-toggle {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  transition: transform var(--trans-fast);
+  display: none;
 }
 
 .add-poi-card {
@@ -1235,6 +1225,31 @@ html, body {
   display: flex; align-items: center; justify-content: center;
 }
 .trip-card-delete:hover { background: #fee; border-color: #f44; color: #f44; }
+
+/* Rename button on user-created trip cards */
+.trip-card-rename {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-light);
+  border-radius: 50%;
+  width: 26px; height: 26px;
+  font-size: 14px; line-height: 1;
+  cursor: pointer;
+  transition: all var(--trans-fast);
+  display: flex; align-items: center; justify-content: center;
+}
+.trip-card-rename:hover { background: #eff6ff; border-color: var(--color-accent); color: var(--color-accent); }
+
+.trip-card-name-input {
+  font-size: 15px; font-weight: 600;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  outline: none;
+  width: 100%;
+  font-family: inherit;
+}
 
 /* Trip selector title row (with optional close button) */
 .trip-selector-title {
@@ -1917,11 +1932,18 @@ html, body {
 .day-highlight-score { font-size: 13px; font-weight: 700; color: var(--color-accent); margin-top: 2px; }
 
 /* ─── Auth Gate ─── */
+@keyframes auth-gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
 #auth-gate {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: linear-gradient(135deg, #1a1a2e 0%, #1b2838 30%, #1a2744 50%, #1e2a4a 70%, #0f3460 100%);
+  background: linear-gradient(-45deg, #1a1a2e, #0f3460, #1b2838, #16213e, #1a2744, #0a1628);
+  background-size: 400% 400%;
+  animation: auth-gradient-shift 15s ease infinite;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1968,7 +1990,6 @@ html, body {
     padding: 4px 7px !important;
     font-size: 14px !important;
   }
-  #btn-reset-plan { font-size: 10px !important; }
 
   /* Tighter transport / acc cards on mobile */
   .transport-type-group { gap: 2px; }
