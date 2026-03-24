@@ -1846,7 +1846,9 @@ function buildAddCardHtml(poi) {
     <div class="add-poi-icon">${icon}</div>
     <div class="add-poi-info" onclick="App.addPoi('${poi.id}')">
       <div class="add-poi-name">${esc(poi.name)}${poi.confirmedBooking ? ' ⭐' : ''}</div>
-      <div class="add-poi-meta">${poi.duration}h · ${poi.costLabel || 'Free'} · ${getKidsHtml(poi.kidsRating)}</div>
+      <div class="add-poi-meta">${poi.duration}h · ${poi.costLabel || 'Free'}</div>
+      ${poi.rating ? `<div class="poi-stars">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</div>` : ''}
+      <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
     </div>
     <button class="btn-icon btn-edit-sm" onclick="App.openPoiEditModal('${poi.id}')" title="Edit">✏️</button>
     <button class="btn-add-poi" onclick="App.addPoi('${poi.id}')">+</button>
@@ -3115,9 +3117,10 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
   return `<div class="add-poi-card search-result-card">
     <div class="add-poi-icon">${cat.icon}</div>
     <div class="add-poi-info">
-      <div class="add-poi-name">${esc(name)} ${starHtml}</div>
+      <div class="add-poi-name">${esc(name)}</div>
       ${subtitle ? `<div class="add-poi-meta disc-subtitle">${esc(subtitle)}</div>` : ''}
       ${bits.length ? `<div class="disc-osm-tags">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
+      ${starHtml ? `<div class="poi-stars">${starHtml}</div>` : ''}
     </div>
     <button class="btn-add-poi disc-add-btn" data-disc-key="${esc(key)}" title="Add to day">+</button>
   </div>`;
