@@ -327,9 +327,11 @@ const Storage = {
     const edits = {};
     State.trip?.pois.forEach(p => {
       edits[p.id] = {
-        name: p.name, category: p.category, emoji: p.emoji || null,
-        duration: p.duration, cost: p.cost, costAmount: p.costAmount, costLabel: p.costLabel,
-        kidsFriendly: p.kidsFriendly, kidsRating: p.kidsRating,
+        name: p.name || '', category: p.category || 'monument', emoji: p.emoji || '',
+        duration: p.duration ?? 1, cost: p.cost ?? 0, costAmount: p.costAmount ?? 0,
+        costLabel: p.costLabel || 'Free',
+        kidsFriendly: p.kidsFriendly ?? p.kidsRating ?? 3,
+        kidsRating: p.kidsRating ?? p.kidsFriendly ?? 3,
         description: p.description || '', confirmedBooking: p.confirmedBooking || false,
         bookingTime: p.bookingTime || '', bookingRef: p.bookingRef || '',
       };
@@ -2753,7 +2755,11 @@ function accLocationSearch(inputEl) {
       if (!results.length) { resultsEl.innerHTML = '<div class="ae-search-empty">No results</div>'; return; }
       resultsEl.innerHTML = results.map(r => {
         const name = r.name || r.display_name.split(',')[0];
-        const addr = r.display_name.split(',').slice(1, 3).join(',').trim();
+        // Extract city from addressdetails (more reliable than splitting display_name)
+        const a = r.address || {};
+        const city = a.city || a.town || a.village || a.municipality || a.county || '';
+        const country = a.country || '';
+        const addr = [city, country].filter(Boolean).join(', ') || r.display_name.split(',').slice(1, 3).join(',').trim();
         return `<div class="ae-search-result" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${esc(name)}" data-addr="${esc(addr)}"
           onclick="App.selectAccLocation(+this.dataset.lat, +this.dataset.lon, this.dataset.name, this.dataset.addr)">
           <span class="ae-result-name">${esc(name)}</span>

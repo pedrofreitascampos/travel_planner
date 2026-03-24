@@ -411,6 +411,36 @@ test('deleteAccommodation: clears routes and recalculates metrics', () => {
   ctx.global.document.getElementById = origGetEl;
 });
 
+test('savePoiEdits: no undefined values in saved data (Firebase rejects them)', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Simulate POIs with missing fields (like bundled trip data)
+  ctx.State.trip.pois.push({
+    id: 'poi-sparse',
+    name: 'Sparse POI',
+    category: 'monument',
+    // Missing: costAmount, kidsFriendly, emoji, description, confirmedBooking, etc.
+  });
+
+  let savedData = null;
+  const origSet = ctx.DB.set;
+  ctx.DB.set = (path, data) => { if (path.includes('poiEdits')) savedData = data; return Promise.resolve(); };
+
+  ctx.Storage.savePoiEdits('test-trip');
+
+  assert.ok(savedData, 'savePoiEdits should write data');
+  const sparseEdit = savedData['poi-sparse'];
+  assert.ok(sparseEdit, 'sparse POI should be in edits');
+
+  // Check no undefined values
+  for (const [k, v] of Object.entries(sparseEdit)) {
+    assert.ok(v !== undefined, `poi-sparse.${k} should not be undefined (got ${v})`);
+  }
+
+  ctx.DB.set = origSet;
+});
+
 test('loadPoiEdits: restores POI edits on trip load', async () => {
   const ctx = createTestContext();
   installMockTrip(ctx);
