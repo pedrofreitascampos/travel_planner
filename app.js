@@ -1218,15 +1218,31 @@ function fitMapToDay(dayIndex) {
   }
 }
 
-async function drawRoute(dayIndex) {
+function clearAllRoutes() {
   if (!State.map) return;
-  // Draw inter-city route between accommodations (separate from in-city POI route)
-  drawInterCityRoute(dayIndex);
+  // Clear in-city route
   if (State.routePolyline) {
     State.map.removeLayer(State.routePolyline);
     State.routePolyline = null;
   }
+  // Clear inter-city route (can be single layer or array of layers)
+  if (State.interCityPolyline) {
+    if (Array.isArray(State.interCityPolyline)) {
+      State.interCityPolyline.forEach(l => { try { State.map.removeLayer(l); } catch {} });
+    } else {
+      try { State.map.removeLayer(State.interCityPolyline); } catch {}
+    }
+    State.interCityPolyline = null;
+  }
   State.lastRouteResult = null;
+  State.lastInterCityResult = null;
+}
+
+async function drawRoute(dayIndex) {
+  if (!State.map) return;
+  clearAllRoutes();
+  // Draw inter-city route between accommodations
+  drawInterCityRoute(dayIndex);
 
   const day = getDay(dayIndex);
   if (!day) return;
@@ -1344,16 +1360,6 @@ async function findNearestAirport(lat, lng) {
 let _interCityGen = 0; // prevents stale async responses from adding layers
 
 async function drawInterCityRoute(dayIndex) {
-  // Clear existing
-  if (State.interCityPolyline) {
-    if (Array.isArray(State.interCityPolyline)) {
-      State.interCityPolyline.forEach(l => State.map.removeLayer(l));
-    } else {
-      State.map.removeLayer(State.interCityPolyline);
-    }
-    State.interCityPolyline = null;
-  }
-  State.lastInterCityResult = null;
   const gen = ++_interCityGen;
 
   const day = getDay(dayIndex);
@@ -2042,7 +2048,7 @@ function selectDay(index) {
     tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   });
 
-  State.lastRouteResult = null;
+  clearAllRoutes();
   clearDiscoveryMarkers();
   renderDayPlanContent(index);
   placeMarkers();
@@ -2592,6 +2598,7 @@ function setDayAcc(date, accId) {
   if (accId) State.dayAccAssignments[date] = accId;
   else delete State.dayAccAssignments[date];
   Storage.save();
+  clearAllRoutes();
   placeMarkers();
   renderAll();
   drawRoute(State.selectedDayIndex);
@@ -2802,6 +2809,7 @@ function saveAccEdit() {
   Storage.saveUserAccs(State.trip.id);
   _pendingNewAccId = null;
   closeAccEditModal();
+  clearAllRoutes();
   placeMarkers();
   renderAll();
   drawRoute(State.selectedDayIndex);
