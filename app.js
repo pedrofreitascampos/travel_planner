@@ -1431,16 +1431,11 @@ async function drawInterCityRoute(dayIndex) {
 // ─── Effective Day Label ────────────────────────────────────────
 function getEffectiveDayLabel(day) {
   if (State.dayLabels?.[day.date]) return State.dayLabels[day.date];
-  // Derive from arrival accommodation's location/name
+  // Derive ONLY from accommodation's .location field (the city/place), never the acc name
   const acc = getEffectiveAcc(day.date);
-  if (acc) {
-    const edit = State.accEdits[acc.id] || {};
-    // Try location first ("Mértola, Portugal" → "Mértola"), then edited name, then acc name
-    for (const src of [acc.location, edit.name, acc.name]) {
-      if (!src) continue;
-      const city = src.split(',')[0].replace(/^(Accommodation|Home|New)\s*[—–-]?\s*/i, '').trim();
-      if (city && city.length > 1) return city;
-    }
+  if (acc?.location) {
+    const city = acc.location.split(',')[0].trim();
+    if (city && city.length > 1) return city;
   }
   return day.label;
 }
@@ -1582,9 +1577,9 @@ function renderDayPlanContent(dayIndex) {
 
   const accCityName = (acc) => {
     if (!acc) return '';
-    const edit = State.accEdits[acc.id] || {};
-    const loc = acc.location || edit.name || acc.name || '';
-    return loc.split(',')[0].replace(/^(Accommodation|Home)\s*[—–-]\s*/i, '').trim();
+    // Use ONLY the .location field (the city/place), not the acc name
+    if (acc.location) return acc.location.split(',')[0].trim();
+    return '';
   };
   const depCity = accCityName(departureAcc);
   const arrCity = accCityName(arrivalAcc);
