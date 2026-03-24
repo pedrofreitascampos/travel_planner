@@ -41,8 +41,6 @@ const Auth = {
           Auth.user = { uid: user.uid, name: user.displayName, email: user.email, picture: user.photoURL };
           Auth.showApp();
           resolve(true);
-          // Always call init after sign-in to boot or reload the app
-          setTimeout(() => init(), 50);
         } else {
           Auth.showGate();
           resolve(false);
@@ -405,7 +403,7 @@ function getPoisAvailableToAdd(dayIndex) {
 }
 
 function getCostHtml(poi) {
-  if (poi.cost === 0) return `<span class="badge badge-cost free">Free</span>`;
+  if (!poi.costAmount || poi.costAmount === 0 || poi.cost === 'free' || poi.cost === 0) return `<span class="badge badge-cost free">Free</span>`;
   return `<span class="badge badge-cost">${poi.costLabel}</span>`;
 }
 
@@ -1214,12 +1212,8 @@ function fitMapToDay(dayIndex) {
 
 async function drawRoute(dayIndex) {
   if (!State.map) return;
-  // Clear any stale inter-city route layers
-  if (State.interCityPolyline) {
-    if (Array.isArray(State.interCityPolyline)) State.interCityPolyline.forEach(l => State.map.removeLayer(l));
-    else State.map.removeLayer(State.interCityPolyline);
-    State.interCityPolyline = null;
-  }
+  // Draw inter-city route between accommodations (separate from in-city POI route)
+  drawInterCityRoute(dayIndex);
   if (State.routePolyline) {
     State.map.removeLayer(State.routePolyline);
     State.routePolyline = null;
@@ -2208,9 +2202,8 @@ const _weatherOverlays = {};
 function toggleWeatherOverlay(type, show) {
   if (!State.map) return;
   if (!OWM_KEY) {
-    showToast('Set your OpenWeatherMap API key in app.js (OWM_KEY)');
-    // Uncheck the toggle
-    const el = document.getElementById(`toggle-${type === 'rain' ? 'rain' : type === 'clouds' ? 'clouds' : 'temp'}`);
+    showToast('Add your OpenWeatherMap key in Settings → API Keys');
+    const el = document.getElementById(`toggle-${type}`);
     if (el) el.checked = false;
     return;
   }
@@ -2956,7 +2949,8 @@ function saveCustomMarker(lat, lng) {
   Storage.saveImported(State.trip.id);
 
   // Optionally add to a day's plan
-  if (dayDate && State.plan[dayDate] !== undefined) {
+  if (dayDate) {
+    if (!State.plan[dayDate]) State.plan[dayDate] = [];
     State.plan[dayDate].push(id);
     Storage.save();
   }
@@ -2973,7 +2967,7 @@ let _searchTimer = null;
 
 function searchPois(inputEl, dayIndex) {
   const q = inputEl.value.trim();
-  const list = inputEl.closest('.add-more-list');
+  const list = inputEl.closest('.day-tab-panel') || inputEl.closest('.add-more-list');
   const resultsEl = list?.querySelector('.search-results-host');
   if (!resultsEl) return;
   clearTimeout(_searchTimer);
@@ -3098,7 +3092,8 @@ function addDiscoveredResult(lat, lng, name, category, dayIndex, osmTags) {
   State.trip.pois.push(poi);
   State.importedPois.push(poi);
   Storage.saveImported(State.trip.id);
-  if (State.plan[day.date] !== undefined) { State.plan[day.date].push(id); Storage.save(); }
+  if (!State.plan[day.date]) State.plan[day.date] = [];
+  State.plan[day.date].push(id); Storage.save();
   placeMarkers(); renderAll();
   showToast(`"${name}" added`);
 }
@@ -3595,7 +3590,7 @@ function importBooking() {
 
   // Build the list of nights
   const nights = [];
-  for (const d = new Date(checkin + 'T12:00:00'); d.toISOString().split('T')[0] <= checkout; d.setDate(d.getDate() + 1)) {
+  for (const d = new Date(checkin + 'T12:00:00'); d.toISOString().split('T')[0] < checkout; d.setDate(d.getDate() + 1)) {
     nights.push(d.toISOString().split('T')[0]);
   }
 
@@ -3633,10 +3628,9 @@ function importBooking() {
 // ─── Trip Selector ─────────────────────────────────────────────
 // ─── User Trip Management ───────────────────────────────────────
 
-function deleteUserTrip(tripId) {
+async function deleteUserTrip(tripId) {
   if (!confirm('Delete this trip? This cannot be undone.')) return;
-  // Remove from localStorage user trips
-  const userTrips = Storage.loadUserTrips().filter(t => t.id !== tripId);
+  const userTrips = (await Storage.loadUserTrips()).filter(t => t.id !== tripId);
   Storage.saveUserTrips(userTrips);
   // Remove from live registry
   const idx = window._tripRegistry.findIndex(t => t.id === tripId);
@@ -3673,9 +3667,8 @@ function renameUserTrip(tripId, btnEl) {
   input.focus();
   input.select();
 
-  const commit = () => {
+  const commit = async () => {
     const newName = input.value.trim() || oldName;
-    // Restore the name element
     const span = document.createElement('div');
     span.className = 'trip-card-name';
     span.textContent = newName;
@@ -3686,7 +3679,7 @@ function renameUserTrip(tripId, btnEl) {
       const trip = window._tripRegistry.find(t => t.id === tripId);
       if (trip) trip.name = newName;
       // Persist
-      const userTrips = Storage.loadUserTrips();
+      const userTrips = await Storage.loadUserTrips();
       const ut = userTrips.find(t => t.id === tripId);
       if (ut) { ut.name = newName; Storage.saveUserTrips(userTrips); }
       // Update header if this is the active trip
@@ -3875,7 +3868,7 @@ function ntfAddDestination() {
   container.appendChild(row);
 }
 
-function ntfSubmit() {
+async function ntfSubmit() {
   const name = document.getElementById('ntf-name')?.value.trim();
   if (!name) { showToast('Please enter a trip name'); return; }
 
@@ -3906,7 +3899,7 @@ function ntfSubmit() {
   });
 
   // Persist
-  const userTrips = Storage.loadUserTrips();
+  const userTrips = await Storage.loadUserTrips();
   userTrips.push(trip);
   Storage.saveUserTrips(userTrips);
   // Register live
@@ -4053,11 +4046,11 @@ async function loadTrip(tripId) {
     titleEl.contentEditable = 'true';
     titleEl.spellcheck = false;
     titleEl.title = 'Click to rename trip';
-    titleEl.onblur = () => {
+    titleEl.onblur = async () => {
       const newName = titleEl.textContent.trim();
       if (newName && newName !== trip.name) {
         trip.name = newName;
-        const userTrips = Storage.loadUserTrips();
+        const userTrips = await Storage.loadUserTrips();
         const ut = userTrips.find(t => t.id === trip.id);
         if (ut) { ut.name = newName; Storage.saveUserTrips(userTrips); }
       }
@@ -4328,6 +4321,8 @@ function buildSharePayload() {
     dayEmojis: State.dayEmojis,
     importedPois: State.importedPois,
     userAccommodations: State.trip?.accommodations.filter(a => a.isUserCreated) || [],
+    partyConfig: State.partyConfig,
+    settings: State.settings,
   };
 }
 
