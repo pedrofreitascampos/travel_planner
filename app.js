@@ -41,8 +41,8 @@ const Auth = {
           Auth.user = { uid: user.uid, name: user.displayName, email: user.email, picture: user.photoURL };
           Auth.showApp();
           resolve(true);
-          // If app hasn't booted yet, init will continue. If it has, re-init to load data.
-          if (_appBooted) init();
+          // Always call init after sign-in to boot or reload the app
+          setTimeout(() => init(), 50);
         } else {
           Auth.showGate();
           resolve(false);

@@ -1953,7 +1953,6 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
 }
 /* Rainbow bridge arc */
 #auth-gate::before {
