@@ -1219,7 +1219,18 @@ function fitMapToDay(dayIndex) {
 
 async function drawRoute(dayIndex) {
   if (!State.map) return;
-  drawInterCityRoute(dayIndex); // fire-and-forget inter-city route
+  // Draw inter-city route separately only for flights (GCC arc)
+  const dayTransportCheck = State.dayTransport[getDay(dayIndex)?.date] || {};
+  if (dayTransportCheck.type === 'flight') {
+    drawInterCityRoute(dayIndex);
+  } else {
+    // Clear any stale inter-city route — unified route handles everything
+    if (State.interCityPolyline) {
+      if (Array.isArray(State.interCityPolyline)) State.interCityPolyline.forEach(l => State.map.removeLayer(l));
+      else State.map.removeLayer(State.interCityPolyline);
+      State.interCityPolyline = null;
+    }
+  }
   if (State.routePolyline) {
     State.map.removeLayer(State.routePolyline);
     State.routePolyline = null;
@@ -1606,17 +1617,14 @@ function renderDayPlanContent(dayIndex) {
       title="${t.label}">${t.icon}</button>`
   ).join('');
 
-  const drivingHtml = day.driving ? `
+  const drivingHtml = hasInterCity ? `
     <div class="drive-info">
       <div class="drive-info-icon">${tInfo.icon}</div>
       <div class="drive-info-text">
-        <div class="drive-info-label">${esc(day.driving.from)} → ${esc(day.driving.to)}</div>
-        <div class="drive-info-detail">${formatDuration(displayMin)} · ${day.driving.approxKm} km</div>
+        <div class="drive-info-label">${esc(day.driving?.from || (departureAcc ? (departureAcc.location?.split(',')[0] || '') : ''))} → ${esc(day.driving?.to || (arrivalAcc ? (arrivalAcc.location?.split(',')[0] || '') : ''))}</div>
+        ${km > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
       </div>
-      <div class="transport-type-group">
-        ${typeButtons}
-        ${costPerPersonField}
-      </div>
+      <div class="transport-type-group">${typeButtons}${costPerPersonField}</div>
     </div>` : '';
 
   // Accommodation for this day
@@ -1627,6 +1635,9 @@ function renderDayPlanContent(dayIndex) {
   let arrivalAcc = getEffectiveAcc(day.date);
   // If arrival = departure and it's a travel day, resolve to home
   if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id && day.driving) arrivalAcc = getHomeAcc();
+
+  // Is this an inter-city travel day?
+  const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
 
   const allAccs = State.trip.accommodations;
   const accSelectHtml = (selectedId, date) => {
@@ -1647,11 +1658,13 @@ function renderDayPlanContent(dayIndex) {
     if (!departureAcc) return '';
     const edit = State.accEdits[departureAcc.id] || {};
     const name = edit.name || departureAcc.name;
+    const loc = departureAcc.location?.split(',')[0] || '';
     return `
     <div class="acc-card acc-depart">
       <div class="acc-icon">${departureAcc.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
         <div class="acc-name"><span class="text-xs text-secondary">Depart — </span>${esc(name)}</div>
+        ${loc ? `<div class="acc-note">${esc(loc)}</div>` : ''}
       </div>
     </div>`;
   })();
@@ -1660,13 +1673,14 @@ function renderDayPlanContent(dayIndex) {
   const arriveCardHtml = (() => {
     const edit = arrivalAcc ? (State.accEdits[arrivalAcc.id] || {}) : {};
     const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
+    const loc = arrivalAcc?.location?.split(',')[0] || '';
     const notes = arrivalAcc ? (edit.notes !== undefined ? edit.notes : (arrivalAcc.notes || '')) : '';
     return `
     <div class="acc-card acc-arrive">
       <div class="acc-icon">${arrivalAcc?.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
         <div class="acc-name"><span class="text-xs text-secondary">Arrive — </span>${accSelectHtml(arrivalAcc?.id || '', day.date)}</div>
-        ${notes || priceStr ? `<div class="acc-note">${esc(notes)}${priceStr}</div>` : ''}
+        <div class="acc-note">${[loc, notes, priceStr].filter(Boolean).join(' · ')}</div>
       </div>
       ${arrivalAcc && !arrivalAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${arrivalAcc.id}')" title="Edit accommodation">✏️</button>` : ''}
     </div>`;
@@ -1678,9 +1692,6 @@ function renderDayPlanContent(dayIndex) {
         No places planned.<br>Add some from the list below!
       </div>`
     : plan.map((id, idx) => buildPoiCardHtml(id, idx)).join('');
-
-  // Check if this is an inter-city travel day (for "along route" section)
-  const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
 
   // Available to add
   const available = getPoisAvailableToAdd(dayIndex);
