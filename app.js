@@ -1230,13 +1230,16 @@ async function drawRoute(dayIndex) {
   if (!day) return;
   const plan = State.plan[day.date] || [];
   const poiWaypoints = plan.map(id => getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
-  // Add accommodation as start/end point for the route
-  const acc = getEffectiveAcc(day.date);
-  const accCoords = acc ? getAccCoords(acc) : null;
+  // Route: depart acc → POIs → arrive acc
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  const arrAcc = getEffectiveAcc(day.date);
+  const depCoords = depAcc ? getAccCoords(depAcc) : null;
+  const arrCoords = arrAcc ? getAccCoords(arrAcc) : depCoords;
   const waypoints = [];
-  if (accCoords && accCoords.lat && accCoords.lng) waypoints.push([accCoords.lat, accCoords.lng]);
+  if (depCoords?.lat && depCoords?.lng) waypoints.push([depCoords.lat, depCoords.lng]);
   waypoints.push(...poiWaypoints);
-  if (accCoords && accCoords.lat && accCoords.lng && poiWaypoints.length > 0) waypoints.push([accCoords.lat, accCoords.lng]);
+  if (arrCoords?.lat && arrCoords?.lng) waypoints.push([arrCoords.lat, arrCoords.lng]);
   if (waypoints.length < 2) {
     updateRouteSummaryUI(null);
     renderDayMetricsUI(dayIndex, 0);
@@ -1683,8 +1686,6 @@ function renderDayPlanContent(dayIndex) {
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
 
-  const accSummaryHtml = `${departCardHtml}${arriveCardHtml}`;
-
   const contentHtml = `
     <div class="day-header">
       <div class="day-header-top">
@@ -1713,10 +1714,11 @@ function renderDayPlanContent(dayIndex) {
     <!-- TAB: Plan -->
     <div class="day-tab-panel" data-panel="plan">
       <div class="route-summary" style="display:none"></div>
-      ${accSummaryHtml}
+      ${departCardHtml}
       <div class="poi-list" data-day="${dayIndex}">
         ${poiCardsHtml}
       </div>
+      ${arriveCardHtml}
     </div>
 
     <!-- TAB: Discover -->
