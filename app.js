@@ -1588,6 +1588,14 @@ function renderDayPlanContent(dayIndex) {
   if (!day) return;
   const plan = State.plan[day.date] || [];
 
+  // Accommodation for this day — compute first (needed by transport/driving HTML)
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const departureAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  let arrivalAcc = getEffectiveAcc(day.date);
+  if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id && day.driving) arrivalAcc = getHomeAcc();
+  const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
+
+  // Transport info
   const TRANSPORT_TYPES = [
     { type: 'driving', icon: '🚗', label: 'Drive' },
     { type: 'flight',  icon: '✈️', label: 'Flight' },
@@ -1598,12 +1606,11 @@ function renderDayPlanContent(dayIndex) {
   const tType  = dayTransport.type || 'driving';
   const tInfo  = TRANSPORT_TYPES.find(t => t.type === tType) || TRANSPORT_TYPES[0];
   const km = day.driving?.approxKm || 0;
-  const estSpeeds = { driving: null, flight: 800, train: 150, bus: 60 };
   let displayMin;
   if (dayTransport.durationMin) displayMin = dayTransport.durationMin;
-  else if (tType === 'flight')  displayMin = Math.ceil(km / 800 * 60) + 90 + 90; // flight + 90min airport + 2×45min commute
+  else if (tType === 'flight')  displayMin = Math.ceil(km / 800 * 60) + 90 + 90;
   else if (tType === 'driving') displayMin = day.driving?.approxMin;
-  else                          displayMin = Math.ceil(km / (estSpeeds[tType] || 80) * 60);
+  else                          displayMin = Math.ceil(km / ({ train: 150, bus: 60 }[tType] || 80) * 60);
   const costPerPersonField = tType !== 'driving' ? `
     <div class="transport-cost-row">
       <span class="transport-cost-label">€/person:</span>
@@ -1617,27 +1624,17 @@ function renderDayPlanContent(dayIndex) {
       title="${t.label}">${t.icon}</button>`
   ).join('');
 
+  const depCity = departureAcc?.location?.split(',')[0] || '';
+  const arrCity = arrivalAcc?.location?.split(',')[0] || '';
   const drivingHtml = hasInterCity ? `
     <div class="drive-info">
       <div class="drive-info-icon">${tInfo.icon}</div>
       <div class="drive-info-text">
-        <div class="drive-info-label">${esc(day.driving?.from || (departureAcc ? (departureAcc.location?.split(',')[0] || '') : ''))} → ${esc(day.driving?.to || (arrivalAcc ? (arrivalAcc.location?.split(',')[0] || '') : ''))}</div>
+        <div class="drive-info-label">${esc(day.driving?.from || depCity)} → ${esc(day.driving?.to || arrCity)}</div>
         ${km > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
       </div>
       <div class="transport-type-group">${typeButtons}${costPerPersonField}</div>
     </div>` : '';
-
-  // Accommodation for this day
-  // Departure = previous night's acc (or home for first day) — read-only
-  const prevDate = State.trip.days[dayIndex - 1]?.date;
-  const departureAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
-  // Arrival = tonight's acc — editable via dropdown
-  let arrivalAcc = getEffectiveAcc(day.date);
-  // If arrival = departure and it's a travel day, resolve to home
-  if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id && day.driving) arrivalAcc = getHomeAcc();
-
-  // Is this an inter-city travel day?
-  const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
 
   const allAccs = State.trip.accommodations;
   const accSelectHtml = (selectedId, date) => {
