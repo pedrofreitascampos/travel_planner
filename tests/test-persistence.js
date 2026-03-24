@@ -187,4 +187,180 @@ test('Storage.clear: calls DB.remove on the trip path', () => {
   ctx.DB.remove = origRemove;
 });
 
+// ─── Accommodation location persistence ─────────────────────────
+
+test('saveAccEdit: updates acc.location from search result label', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const acc = ctx.State.trip.accommodations.find(a => a.id === 'acc-sintra');
+  acc.location = '';
+
+  if (!ctx.State._aePendingLabel) ctx.State._aePendingLabel = {};
+  ctx.State._aePendingLabel['acc-sintra'] = 'Hotel Essentia, Aracena, Spain';
+
+  const mockModal = { classList: { add() {}, remove() {} } };
+  const mockDom = {
+    'ae-acc-id': { value: 'acc-sintra' },
+    'ae-name': { value: 'Hotel Essentia' },
+    'ae-notes': { value: 'Nice place' },
+    'ae-price': { value: '80' },
+    'ae-lat': { value: '37.89' },
+    'ae-lng': { value: '-6.55' },
+    'acc-edit-modal': mockModal,
+  };
+  const origGetEl = ctx.global.document.getElementById;
+  ctx.global.document.getElementById = (id) => mockDom[id] || origGetEl(id);
+
+  ctx.saveAccEdit();
+
+  assert.strictEqual(acc.location, 'Hotel Essentia, Aracena, Spain', 'acc.location should be set from search label');
+  assert.strictEqual(acc.name, 'Hotel Essentia', 'acc.name should be updated from edit');
+  ctx.global.document.getElementById = origGetEl;
+});
+
+test('saveAccEdit: sets location from name when no search was used', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const acc = ctx.State.trip.accommodations.find(a => a.id === 'acc-sintra');
+  acc.location = '';
+  ctx.State._aePendingLabel = {};
+
+  const mockModal = { classList: { add() {}, remove() {} } };
+  const mockDom = {
+    'ae-acc-id': { value: 'acc-sintra' },
+    'ae-name': { value: 'Casa Rural Aracena' },
+    'ae-notes': { value: '' },
+    'ae-price': { value: '0' },
+    'ae-lat': { value: '0' },
+    'ae-lng': { value: '0' },
+    'acc-edit-modal': mockModal,
+  };
+  const origGetEl = ctx.global.document.getElementById;
+  ctx.global.document.getElementById = (id) => mockDom[id] || origGetEl(id);
+
+  ctx.saveAccEdit();
+
+  assert.strictEqual(acc.location, 'Casa Rural Aracena', 'acc.location should fallback to edited name');
+  ctx.global.document.getElementById = origGetEl;
+});
+
+test('saveAccEdit: preserves existing location when no search used', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const acc = ctx.State.trip.accommodations.find(a => a.id === 'acc-lisbon');
+  const origLoc = acc.location;
+  ctx.State._aePendingLabel = {};
+
+  const mockModal = { classList: { add() {}, remove() {} } };
+  const mockDom = {
+    'ae-acc-id': { value: 'acc-lisbon' },
+    'ae-name': { value: 'Updated Name' },
+    'ae-notes': { value: '' },
+    'ae-price': { value: '100' },
+    'ae-lat': { value: String(acc.lat) },
+    'ae-lng': { value: String(acc.lng) },
+    'acc-edit-modal': mockModal,
+  };
+  const origGetEl = ctx.global.document.getElementById;
+  ctx.global.document.getElementById = (id) => mockDom[id] || origGetEl(id);
+
+  ctx.saveAccEdit();
+
+  assert.strictEqual(acc.location, origLoc, 'existing location should not be overwritten');
+  ctx.global.document.getElementById = origGetEl;
+});
+
+// ─── POI edit persistence ───────────────────────────────────────
+
+test('savePoiEdit: persists cost, booking, duration changes', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const poi = ctx.State.trip.pois[0];
+  const origName = poi.name;
+
+  const mockDom = {
+    'pe-name': { value: 'Renamed POI' },
+    'pe-category': { value: 'food' },
+    'pe-emoji': { value: '🍕', trim() { return '🍕'; } },
+    'pe-duration': { value: '2.5' },
+    'pe-kids': { value: '4' },
+    'pe-notes': { value: 'Great spot', trim() { return 'Great spot'; } },
+    'pe-free': { checked: false },
+    'pe-cost': { value: '15' },
+    'pe-booked': { checked: true },
+    'pe-booking-time': { value: '14:30' },
+    'pe-booking-ref': { value: 'REF999', trim() { return 'REF999'; } },
+    'poi-edit-modal': { classList: { add() {} } },
+  };
+  const origGetEl = ctx.global.document.getElementById;
+  ctx.global.document.getElementById = (id) => mockDom[id] || origGetEl(id);
+
+  ctx.savePoiEdit(poi.id);
+
+  assert.strictEqual(poi.name, 'Renamed POI');
+  assert.strictEqual(poi.category, 'food');
+  assert.strictEqual(poi.duration, 2.5);
+  assert.strictEqual(poi.costAmount, 15);
+  assert.strictEqual(poi.confirmedBooking, true);
+  assert.strictEqual(poi.bookingTime, '14:30');
+  assert.strictEqual(poi.bookingRef, 'REF999');
+
+  ctx.global.document.getElementById = origGetEl;
+});
+
+test('savePoiEdit: calls Storage.savePoiEdits', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  let savedTripId = null;
+  const origSave = ctx.Storage.savePoiEdits;
+  ctx.Storage.savePoiEdits = (tripId) => { savedTripId = tripId; };
+
+  const poi = ctx.State.trip.pois[0];
+  const mockDom = {
+    'pe-name': { value: poi.name },
+    'pe-category': { value: poi.category },
+    'pe-emoji': { value: '', trim() { return ''; } },
+    'pe-duration': { value: '1' },
+    'pe-kids': { value: '3' },
+    'pe-notes': { value: '', trim() { return ''; } },
+    'pe-free': { checked: true },
+    'pe-cost': { value: '0' },
+    'pe-booked': { checked: false },
+    'pe-booking-time': { value: '' },
+    'pe-booking-ref': { value: '', trim() { return ''; } },
+    'poi-edit-modal': { classList: { add() {} } },
+  };
+  const origGetEl = ctx.global.document.getElementById;
+  ctx.global.document.getElementById = (id) => mockDom[id] || origGetEl(id);
+
+  ctx.savePoiEdit(poi.id);
+
+  assert.strictEqual(savedTripId, 'test-trip', 'savePoiEdits should be called with trip ID');
+
+  ctx.Storage.savePoiEdits = origSave;
+  ctx.global.document.getElementById = origGetEl;
+});
+
+test('loadPoiEdits: restores POI edits on trip load', async () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Simulate saved POI edits in Firebase
+  const edits = {
+    'poi-1': { name: 'Edited Name', costAmount: 25, confirmedBooking: true, bookingTime: '10:00' },
+  };
+  await ctx.DB.set('trips/test-trip/poiEdits', edits);
+
+  const loaded = await ctx.Storage.loadPoiEdits('test-trip');
+  assert.ok(loaded['poi-1'], 'Should have poi-1 edits');
+  assert.strictEqual(loaded['poi-1'].name, 'Edited Name');
+  assert.strictEqual(loaded['poi-1'].costAmount, 25);
+  assert.strictEqual(loaded['poi-1'].confirmedBooking, true);
+});
+
 module.exports = tests;

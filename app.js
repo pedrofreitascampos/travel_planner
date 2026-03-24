@@ -2766,6 +2766,17 @@ function saveAccEdit() {
     ...(coordsChanged ? { lat, lng } : {}),
     ...(State._aePendingLabel?.[accId] ? { locationLabel: State._aePendingLabel[accId] } : {}),
   };
+  // Update the accommodation's location from search result or name
+  if (acc) {
+    const editedName = State.accEdits[accId].name;
+    if (State._aePendingLabel?.[accId]) {
+      acc.location = State._aePendingLabel[accId];
+    } else if (!acc.location && editedName) {
+      acc.location = editedName;
+    }
+    // Also update the acc name from edits
+    if (editedName) acc.name = editedName;
+  }
   Storage.saveAccEdits(State.trip.id);
   Storage.saveUserAccs(State.trip.id);
   _pendingNewAccId = null;

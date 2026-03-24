@@ -292,9 +292,15 @@ function createTestContext() {
     window.ALLOWED_EMAILS = ALLOWED_EMAILS;
     window.tripRegistry = tripRegistry;
     window.METRIC_TOOLTIPS = METRIC_TOOLTIPS;
+    window.saveAccEdit = saveAccEdit;
+    window.savePoiEdit = savePoiEdit;
+    window._pendingNewAccId = typeof _pendingNewAccId !== 'undefined' ? _pendingNewAccId : null;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });
+
+  // Expose the sandbox as ctx.global for tests that need to mock document
+  ctx.global = sandbox;
 
   return ctx;
 }
