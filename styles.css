@@ -1931,29 +1931,90 @@ html, body {
 .day-highlight-name { font-size: 12px; font-weight: 600; color: var(--color-text); line-height: 1.3; }
 .day-highlight-score { font-size: 13px; font-weight: 700; color: var(--color-accent); margin-top: 2px; }
 
-/* ─── Auth Gate ─── */
-@keyframes auth-gradient-shift {
+/* ─── Auth Gate — Bifröst (rainbow bridge) ─── */
+@keyframes bifrost-shimmer {
   0%   { background-position: 0% 50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+@keyframes bridge-glow {
+  0%, 100% { opacity: 0.12; }
+  50%      { opacity: 0.25; }
 }
 #auth-gate {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: linear-gradient(-45deg, #1a1a2e, #0f3460, #1b2838, #16213e, #1a2744, #0a1628);
-  background-size: 400% 400%;
-  animation: auth-gradient-shift 15s ease infinite;
+  background: linear-gradient(-45deg,
+    #1a0a2e, #0f1460, #0a2e3d, #0f3460,
+    #2d1b4e, #1a2744, #0a1628, #1e0a3a);
+  background-size: 600% 600%;
+  animation: bifrost-shimmer 20s ease infinite;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+/* Rainbow bridge arc */
+#auth-gate::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 160vmax;
+  height: 160vmax;
+  transform: translate(-50%, -50%);
+  background: conic-gradient(from 0deg,
+    rgba(255,0,0,0.08),
+    rgba(255,127,0,0.08),
+    rgba(255,255,0,0.06),
+    rgba(0,200,0,0.06),
+    rgba(0,100,255,0.08),
+    rgba(75,0,130,0.08),
+    rgba(148,0,211,0.06),
+    rgba(255,0,0,0.08));
+  border-radius: 50%;
+  animation: bridge-glow 6s ease-in-out infinite;
+  pointer-events: none;
+}
+/* Subtle horizontal rainbow band — the bridge itself */
+#auth-gate::after {
+  content: '';
+  position: absolute;
+  top: 42%;
+  left: -10%;
+  right: -10%;
+  height: 3px;
+  background: linear-gradient(90deg,
+    transparent 5%,
+    rgba(255,50,50,0.4) 15%,
+    rgba(255,165,0,0.4) 30%,
+    rgba(255,255,50,0.3) 42%,
+    rgba(50,205,50,0.3) 55%,
+    rgba(50,100,255,0.4) 70%,
+    rgba(138,43,226,0.4) 85%,
+    transparent 95%);
+  filter: blur(1px);
+  pointer-events: none;
 }
 .auth-card {
   text-align: center;
   padding: 40px;
+  position: relative;
+  z-index: 1;
 }
 .auth-logo { font-size: 64px; margin-bottom: 12px; }
-.auth-title { font-size: 32px; font-weight: 800; color: white; letter-spacing: 1px; }
+.auth-title {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  background: linear-gradient(90deg, #ff6b6b, #ffa500, #ffd93d, #6bcb77, #4d96ff, #9b59b6);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: bifrost-shimmer 8s linear infinite;
+}
 .auth-subtitle { font-size: 14px; color: rgba(255,255,255,0.55); margin: 8px 0 28px; }
 #g-signin-btn { display: flex; justify-content: center; }
 .auth-google-btn {
