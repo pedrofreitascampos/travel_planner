@@ -1,6 +1,6 @@
 // Trip: Seville & Portugal 2026
 // Family trip: parents + 3yo and 6yo kids
-// April 3–11, 2026
+// April 3–12, 2026
 
 window.registerTrip({
   id: 'seville-2026',
@@ -8,7 +8,7 @@ window.registerTrip({
   subtitle: 'Mértola · Aracena · Seville · Monte Gordo',
   coverColor: '#e07b54',
   startDate: '2026-04-03',
-  endDate: '2026-04-11',
+  endDate: '2026-04-12',
   kidsFriendly: true,
 
   accommodations: [
@@ -46,7 +46,7 @@ window.registerTrip({
       location: 'Monte Gordo, Portugal',
       lat: 37.1770,
       lng: -7.4551,
-      days: ['2026-04-10', '2026-04-11'],
+      days: ['2026-04-10', '2026-04-11', '2026-04-12'],
       notes: 'Beach area'
     }
   ],
@@ -136,9 +136,17 @@ window.registerTrip({
     },
     {
       date: '2026-04-11',
+      label: 'Monte Gordo',
+      destination: 'Monte Gordo',
+      emoji: '🏖️',
+      country: 'Portugal',
+      driving: null
+    },
+    {
+      date: '2026-04-12',
       label: 'Monte Gordo → Lisbon',
       destination: 'Lisbon',
-      emoji: '🏖️',
+      emoji: '🏠',
       country: 'Portugal',
       driving: {
         from: 'Monte Gordo',
@@ -822,7 +830,7 @@ window.registerTrip({
       wikipediaTitle: 'Monte_Gordo',
       tags: ['beach', 'sand', 'family', 'relaxing'],
       openingHours: 'Always open',
-      availableDays: ['2026-04-10', '2026-04-11']
+      availableDays: ['2026-04-10', '2026-04-11', '2026-04-12']
     },
     {
       id: 'castro-marim',
@@ -846,7 +854,7 @@ window.registerTrip({
       wikipediaTitle: 'Castro_Marim_Castle',
       tags: ['castle', 'flamingos', 'nature', 'views'],
       openingHours: 'Daily 9:00–17:00',
-      availableDays: ['2026-04-10', '2026-04-11'],
+      availableDays: ['2026-04-10', '2026-04-11', '2026-04-12'],
       notes: '🦩 Flamingos in the salt marshes — best in spring!'
     },
     {
@@ -871,7 +879,7 @@ window.registerTrip({
       wikipediaTitle: 'Tavira',
       tags: ['town', 'algarve', 'roman bridge', 'seafood'],
       openingHours: 'Always open',
-      availableDays: ['2026-04-10', '2026-04-11'],
+      availableDays: ['2026-04-10', '2026-04-11', '2026-04-12'],
       notes: '30 min drive from Monte Gordo'
     }
   ],
@@ -885,6 +893,7 @@ window.registerTrip({
     '2026-04-08': ['plaza-espana', 'parque-maria-luisa', 'triana', 'espacio-eslava'],
     '2026-04-09': ['catedral-giralda', 'torre-del-oro', 'el-arenal'],
     '2026-04-10': ['palacio-duenas'],
-    '2026-04-11': ['monte-gordo-beach', 'castro-marim']
+    '2026-04-11': ['monte-gordo-beach', 'castro-marim'],
+    '2026-04-12': []
   }
 });

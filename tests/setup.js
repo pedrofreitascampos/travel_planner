@@ -292,6 +292,7 @@ function createTestContext() {
     window.ALLOWED_EMAILS = ALLOWED_EMAILS;
     window.tripRegistry = tripRegistry;
     window.METRIC_TOOLTIPS = METRIC_TOOLTIPS;
+    window.EMOJI_GRID = EMOJI_GRID;
     window.saveAccEdit = saveAccEdit;
     window.savePoiEdit = savePoiEdit;
     window._pendingNewAccId = typeof _pendingNewAccId !== 'undefined' ? _pendingNewAccId : null;

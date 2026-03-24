@@ -1698,10 +1698,16 @@ function renderDayPlanContent(dayIndex) {
   const contentHtml = `
     <div class="day-header">
       <div class="day-header-top">
-        <div class="day-header-emoji" contenteditable="true" spellcheck="false"
-          onblur="App.saveDayEmoji('${day.date}', this.textContent)"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-          title="Click to change emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
+        <div class="day-emoji-wrap">
+          <div class="day-header-emoji" id="day-emoji-${day.date}" contenteditable="true" spellcheck="false"
+            onblur="App.saveDayEmoji('${day.date}', this.textContent)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+            onclick="App.toggleEmojiPicker('day-emoji-picker-${day.date}')"
+            title="Click to change emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
+          <div id="day-emoji-picker-${day.date}" class="hidden day-emoji-picker-dropdown">
+            ${buildEmojiPickerHtml('day-emoji-' + day.date, 'day-emoji-grid')}
+          </div>
+        </div>
         <div class="day-header-info">
           <div class="day-header-title" contenteditable="true" spellcheck="false"
             onblur="App.saveDayLabel('${day.date}', this.textContent)"
@@ -3329,6 +3335,38 @@ async function discoverAlongRoute(dayIndex) {
   renderDiscoverResults(allElements, '.route-discover-results', mid.lat, mid.lng, dayIndex);
 }
 
+// ─── Emoji Picker Helper ────────────────────────────────────────
+
+const EMOJI_GRID = ['🏛️','🎨','🍽️','🍷','🌿','🌳','🏖️','🦇','🎢','🚶','🏰','⛪','🌊','🏨','🎭','🛍️','🎪','⛰️','🏛','🗿'];
+
+function buildEmojiPickerHtml(inputId, extraClass) {
+  return `<div class="emoji-picker-grid ${extraClass || ''}" data-target="${inputId}">
+    ${EMOJI_GRID.map(e => `<button type="button" class="emoji-pick-btn" onclick="App.pickEmoji(this,'${inputId}')">${e}</button>`).join('')}
+  </div>`;
+}
+
+function pickEmoji(btn, inputId) {
+  const emoji = btn.textContent.trim();
+  const input = document.getElementById(inputId);
+  if (input) {
+    if (input.contentEditable === 'true') {
+      input.textContent = emoji;
+      input.dispatchEvent(new Event('input'));
+      input.blur();
+    } else {
+      input.value = emoji;
+      input.dispatchEvent(new Event('input'));
+    }
+  }
+  // Also trigger preview update if pe-emoji
+  if (inputId === 'pe-emoji') pePreviewIcon();
+}
+
+function toggleEmojiPicker(pickerId) {
+  const el = document.getElementById(pickerId);
+  if (el) el.classList.toggle('hidden');
+}
+
 // ─── POI Edit Modal ─────────────────────────────────────────────
 
 function openPoiEditModal(poiId) {
@@ -3366,8 +3404,12 @@ function openPoiEditModal(poiId) {
             <input id="pe-emoji" type="text" class="settings-input"
               value="${esc(poi.emoji || '')}" placeholder="none"
               style="text-align:center;font-size:18px;" maxlength="4"
-              oninput="App.pePreviewIcon()">
+              oninput="App.pePreviewIcon()"
+              onclick="App.toggleEmojiPicker('pe-emoji-picker')">
           </div>
+        </div>
+        <div id="pe-emoji-picker" class="hidden">
+          ${buildEmojiPickerHtml('pe-emoji', 'pe-emoji-grid')}
           <div id="pe-icon-preview" style="font-size:30px;padding:4px 6px;line-height:1;align-self:flex-end">
             ${currentIcon}
           </div>
@@ -3789,58 +3831,61 @@ function createUserTrip(formData) {
     });
   }
 
-  formData.destinations.forEach((dest, di) => {
-    const start = new Date(dest.dateFrom + 'T12:00:00');
-    const end   = new Date(dest.dateTo   + 'T12:00:00');
-    const destDays = [];
-    const prevDest = di > 0 ? formData.destinations[di - 1] : null;
+  // Build days and accommodations from legs
+  const legs = formData.legs || formData.destinations || [];
+  legs.forEach((leg, li) => {
+    const start = new Date(leg.dateFrom + 'T12:00:00');
+    const end   = new Date(leg.dateTo   + 'T12:00:00');
+    const legDays = [];
+    const prevLeg = li > 0 ? legs[li - 1] : null;
+    const cityName = leg.city || leg.name;
     for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
-      destDays.push(dateStr);
-      const isFirstDayOfLeg = dateStr === dest.dateFrom;
+      legDays.push(dateStr);
+      const isFirstDayOfLeg = dateStr === leg.dateFrom;
       const isFirstDay = allDays.length === 0;
-      // Auto-detect travel day: first day of each leg (except the very first if no home)
-      const fromCity = isFirstDay ? (formData.home || null) : (prevDest?.name || null);
+      const fromCity = isFirstDay ? (formData.home || null) : (prevLeg ? (prevLeg.city || prevLeg.name) : null);
       const driving = isFirstDayOfLeg && fromCity ? {
         from: fromCity,
-        to: dest.name,
+        to: cityName,
         approxKm: 0,
         approxMin: 0,
         note: '',
       } : null;
       allDays.push({
         date: dateStr,
-        label: isFirstDayOfLeg && fromCity ? `${fromCity} → ${dest.name}` : dest.name,
-        destination: dest.name,
-        emoji: dest.emoji || '📍',
-        country: dest.country || '',
+        label: isFirstDayOfLeg && fromCity ? `${fromCity} → ${cityName}` : cityName,
+        destination: cityName,
+        emoji: leg.emoji || '📍',
+        country: leg.country || '',
         driving,
       });
       defaultDayPlans[dateStr] = [];
     }
     accommodations.push({
-      id: `acc-${di}`,
-      name: `Accommodation ${dest.name}`,
-      location: dest.country ? `${dest.name}, ${dest.country}` : dest.name,
+      id: `acc-${li}`,
+      name: leg.accName || `Accommodation ${cityName}`,
+      location: leg.country ? `${cityName}, ${leg.country}` : cityName,
       lat: 0, lng: 0,
-      days: destDays,
+      days: legDays,
       notes: '',
     });
   });
 
   // Add return day if home is set
-  const lastDest = formData.destinations[formData.destinations.length - 1];
-  if (formData.home && lastDest) {
-    const returnDate = new Date(lastDest.dateTo + 'T12:00:00');
+  const lastLeg = legs[legs.length - 1];
+  if (formData.home && lastLeg) {
+    const lastCity = lastLeg.city || lastLeg.name;
+    const returnDate = new Date(lastLeg.dateTo + 'T12:00:00');
     returnDate.setDate(returnDate.getDate() + 1);
     const returnDateStr = returnDate.toISOString().split('T')[0];
     allDays.push({
       date: returnDateStr,
-      label: `${lastDest.name} → ${formData.home}`,
+      label: `${lastCity} → ${formData.home}`,
       destination: formData.home,
       emoji: '🏠',
       country: '',
-      driving: { from: lastDest.name, to: formData.home, approxKm: 0, approxMin: 0, note: '' },
+      driving: { from: lastCity, to: formData.home, approxKm: 0, approxMin: 0, note: '' },
     });
     defaultDayPlans[returnDateStr] = [];
   }
@@ -3848,7 +3893,7 @@ function createUserTrip(formData) {
   return {
     id,
     name: formData.name,
-    subtitle: formData.destinations.map(d => d.name).join(' · '),
+    subtitle: legs.map(l => l.city || l.name).join(' · '),
     coverColor: formData.color || '#e07b54',
     emoji: formData.emoji || '✈️',
     isUserCreated: true,
@@ -3884,7 +3929,7 @@ function openNewTripForm() {
             <input id="ntf-name" type="text" placeholder="e.g. Lisbon Weekend" autocomplete="off">
           </div>
           <div class="ntf-field ntf-field-narrow">
-            <label>Emoji</label>
+            <label>Icon</label>
             <input id="ntf-emoji" type="text" placeholder="✈️" maxlength="4" style="text-align:center;font-size:20px;">
           </div>
           <div class="ntf-field ntf-field-narrow">
@@ -3900,8 +3945,8 @@ function openNewTripForm() {
           </div>
         </div>
 
-        <div class="ntf-section-label">Legs / Destinations <button class="ntf-add-dest" onclick="App.ntfAddDestination()">＋ Add</button></div>
-        <div id="ntf-destinations"></div>
+        <div class="ntf-section-label">Legs (accommodations) <button class="ntf-add-dest" onclick="App.ntfAddLeg()">＋ Add leg</button></div>
+        <div id="ntf-legs"></div>
 
         <div class="ntf-actions">
           <button class="ntf-cancel" onclick="App.closeNewTripForm()">Cancel</button>
@@ -3910,8 +3955,8 @@ function openNewTripForm() {
       </div>
     </div>`;
   modal.classList.remove('hidden');
-  // Add first destination row automatically
-  ntfAddDestination();
+  // Add first leg row automatically
+  ntfAddLeg();
   document.getElementById('ntf-name')?.focus();
 }
 
@@ -3919,21 +3964,26 @@ function closeNewTripForm() {
   document.getElementById('new-trip-modal')?.classList.add('hidden');
 }
 
-function ntfAddDestination() {
-  const container = document.getElementById('ntf-destinations');
+function ntfAddLeg() {
+  const container = document.getElementById('ntf-legs');
   if (!container) return;
   const idx = container.children.length;
   const row = document.createElement('div');
-  row.className = 'ntf-dest-row';
+  row.className = 'ntf-leg-row';
   row.innerHTML = `
-    <div class="ntf-dest-fields">
-      <input class="ntf-dest-emoji" type="text" placeholder="📍" maxlength="4" style="width:40px;text-align:center;font-size:18px;" autocomplete="off">
-      <input class="ntf-dest-name" type="text" placeholder="City / place name" autocomplete="off">
-      <input class="ntf-dest-country" type="text" placeholder="Country" style="max-width:100px;" autocomplete="off">
-      <input class="ntf-dest-from" type="date" title="From">
-      <input class="ntf-dest-to" type="date" title="To">
+    <div class="ntf-leg-fields">
+      <div class="ntf-leg-main">
+        <input class="ntf-leg-acc" type="text" placeholder="Accommodation name" autocomplete="off">
+        <input class="ntf-leg-city" type="text" placeholder="City / location" autocomplete="off">
+      </div>
+      <div class="ntf-leg-dates">
+        <label>Check-in</label>
+        <input class="ntf-leg-checkin" type="date" title="Check-in">
+        <label>Check-out</label>
+        <input class="ntf-leg-checkout" type="date" title="Check-out">
+      </div>
     </div>
-    ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-dest-row').remove()" title="Remove">×</button>` : ''}`;
+    ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-leg-row').remove()" title="Remove">×</button>` : ''}`;
   container.appendChild(row);
 }
 
@@ -3941,30 +3991,29 @@ async function ntfSubmit() {
   const name = document.getElementById('ntf-name')?.value.trim();
   if (!name) { showToast('Please enter a trip name'); return; }
 
-  const rows = document.querySelectorAll('#ntf-destinations .ntf-dest-row');
-  if (!rows.length) { showToast('Add at least one destination'); return; }
+  const rows = document.querySelectorAll('#ntf-legs .ntf-leg-row');
+  if (!rows.length) { showToast('Add at least one leg'); return; }
 
-  const destinations = [];
+  const legs = [];
   let valid = true;
   rows.forEach(row => {
-    const emoji    = row.querySelector('.ntf-dest-emoji')?.value.trim() || '📍';
-    const cityName = row.querySelector('.ntf-dest-name')?.value.trim();
-    const country  = row.querySelector('.ntf-dest-country')?.value.trim();
-    const dateFrom = row.querySelector('.ntf-dest-from')?.value;
-    const dateTo   = row.querySelector('.ntf-dest-to')?.value;
-    if (!cityName || !dateFrom || !dateTo) { valid = false; return; }
+    const accName  = row.querySelector('.ntf-leg-acc')?.value.trim() || '';
+    const city     = row.querySelector('.ntf-leg-city')?.value.trim();
+    const dateFrom = row.querySelector('.ntf-leg-checkin')?.value;
+    const dateTo   = row.querySelector('.ntf-leg-checkout')?.value;
+    if (!city || !dateFrom || !dateTo) { valid = false; return; }
     if (dateTo < dateFrom) { valid = false; return; }
-    destinations.push({ name: cityName, country, emoji, dateFrom, dateTo });
+    legs.push({ accName, city, name: city, country: '', emoji: '📍', dateFrom, dateTo });
   });
 
-  if (!valid) { showToast('Fill in name + dates for each destination (to ≥ from)'); return; }
+  if (!valid) { showToast('Fill in city + check-in/check-out for each leg (check-out >= check-in)'); return; }
 
   const trip = createUserTrip({
     name,
     emoji: document.getElementById('ntf-emoji')?.value.trim() || '✈️',
     color: document.getElementById('ntf-color')?.value || '#e07b54',
     home: document.getElementById('ntf-home')?.value.trim() || '',
-    destinations,
+    legs,
   });
 
   // Persist
@@ -4627,7 +4676,7 @@ window.App = {
   importBooking,
   openNewTripForm,
   closeNewTripForm,
-  ntfAddDestination,
+  ntfAddLeg,
   ntfSubmit,
   enableCustomMarkerMode,
   disableCustomMarkerMode,
@@ -4641,6 +4690,8 @@ window.App = {
   openPoiEditModal,
   pePreviewIcon,
   savePoiEdit,
+  pickEmoji,
+  toggleEmojiPicker,
   setDayAcc,
   switchDayTab,
   saveDayLabel,
