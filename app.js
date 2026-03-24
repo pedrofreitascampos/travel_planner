@@ -5,80 +5,75 @@
 
 'use strict';
 
-// ─── Google Auth ──────────────────────────────────────────────
-// Replace with your Google OAuth Client ID
-const GOOGLE_CLIENT_ID = '1093754809418-r117ab5131s38f0a6d60stfmrm1r3rr7.apps.googleusercontent.com';
+// ─── Firebase Configuration ──────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyAvWjExtINNkJJNfTP920kf84MgT4rvjOc",
+  authDomain: "tripcraft-e0389.firebaseapp.com",
+  databaseURL: "https://tripcraft-e0389-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "tripcraft-e0389",
+  storageBucket: "tripcraft-e0389.firebasestorage.app",
+  messagingSenderId: "874209627182",
+  appId: "1:874209627182:web:881944909632eeb82163bf",
+};
 const ALLOWED_EMAILS = ['pedrofreitascampos@gmail.com', 'faye.anson@gmail.com'];
 
+// Initialize Firebase
+const firebaseApp = firebase.initializeApp(firebaseConfig);
+const firebaseAuth = firebase.auth();
+const firebaseDb = firebase.database();
+
+// ─── Firebase Auth ───────────────────────────────────────────
 const Auth = {
-  user: null, // { name, email, picture, credential }
+  user: null, // { uid, name, email, picture }
 
   init() {
-    // Check for saved session
-    try {
-      const saved = localStorage.getItem('tripcraft_auth');
-      if (saved) {
-        const data = JSON.parse(saved);
-        // JWT tokens expire — check if it's still recent (7 days)
-        if (data.exp && data.exp > Date.now()) {
-          Auth.user = data;
+    return new Promise(resolve => {
+      firebaseAuth.onAuthStateChanged(user => {
+        if (user) {
+          // Check allowlist
+          if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(user.email)) {
+            alert(`Access denied for ${user.email}.\nContact the trip owner.`);
+            firebaseAuth.signOut();
+            Auth.showGate();
+            resolve(false);
+            return;
+          }
+          Auth.user = { uid: user.uid, name: user.displayName, email: user.email, picture: user.photoURL };
           Auth.showApp();
-          return;
+          resolve(true);
+          // If app hasn't booted yet, init will continue. If it has, re-init to load data.
+          if (_appBooted) init();
+        } else {
+          Auth.showGate();
+          resolve(false);
         }
-      }
-    } catch {}
-
-    // No valid session — show sign-in gate
-    Auth.showGate();
+      });
+    });
   },
 
   showGate() {
     document.getElementById('auth-gate').style.display = '';
     document.getElementById('app').style.display = 'none';
     document.getElementById('bottom-sheet')?.style.setProperty('display', 'none');
-
-    // Render Google Sign-In button — retry until GIS library is loaded
-    const tryRender = () => {
-      if (window.google?.accounts?.id) {
-        Auth._renderButton();
-      } else {
-        setTimeout(tryRender, 300);
-      }
-    };
-    tryRender();
+    // Render sign-in button
+    const btn = document.getElementById('g-signin-btn');
+    if (btn && !btn.dataset.bound) {
+      btn.dataset.bound = '1';
+      btn.innerHTML = `<button class="auth-google-btn" id="auth-google-trigger">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20">
+        Sign in with Google
+      </button>`;
+      btn.querySelector('#auth-google-trigger').addEventListener('click', Auth.signIn);
+    }
   },
 
-  _renderButton() {
-    if (!window.google?.accounts?.id) return;
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: Auth.onSignIn,
-    });
-    google.accounts.id.renderButton(
-      document.getElementById('g-signin-btn'),
-      { theme: 'outline', size: 'large', shape: 'pill', width: 260 }
-    );
-  },
-
-  onSignIn(response) {
+  async signIn() {
     try {
-      const payload = JSON.parse(atob(response.credential.split('.')[1]));
-      // Check email allowlist
-      if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(payload.email)) {
-        alert(`Access denied for ${payload.email}.\nContact the trip owner to be added.`);
-        return;
-      }
-      Auth.user = {
-        name: payload.name,
-        email: payload.email,
-        picture: payload.picture,
-        exp: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 day session
-      };
-      localStorage.setItem('tripcraft_auth', JSON.stringify(Auth.user));
-      Auth.showApp();
-      init(); // boot the app
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await firebaseAuth.signInWithPopup(provider);
+      // onAuthStateChanged will handle the rest
     } catch (e) {
-      console.error('Sign-in failed:', e);
+      if (e.code !== 'auth/popup-closed-by-user') console.error('Sign-in failed:', e);
     }
   },
 
@@ -97,7 +92,9 @@ const Auth = {
     badge.id = 'auth-user-badge';
     badge.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:auto;cursor:pointer;';
     badge.title = `${Auth.user.name}\n${Auth.user.email}\nClick to sign out`;
-    badge.innerHTML = `<img src="${Auth.user.picture}" style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);" referrerpolicy="no-referrer">`;
+    badge.innerHTML = Auth.user.picture
+      ? `<img src="${Auth.user.picture}" style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);" referrerpolicy="no-referrer">`
+      : `<div style="width:26px;height:26px;border-radius:50%;background:var(--color-accent);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">${Auth.user.name?.[0] || '?'}</div>`;
     badge.onclick = () => {
       if (confirm('Sign out?')) Auth.signOut();
     };
@@ -108,10 +105,33 @@ const Auth = {
   },
 
   signOut() {
-    localStorage.removeItem('tripcraft_auth');
+    firebaseAuth.signOut();
     Auth.user = null;
-    google?.accounts?.id?.disableAutoSelect();
     location.reload();
+  },
+};
+
+// ─── Firebase Database helpers ───────────────────────────────
+function dbRef(path) {
+  return firebaseDb.ref(`users/shared/${path}`);
+}
+
+const DB = {
+  async get(path) {
+    try {
+      const snap = await dbRef(path).once('value');
+      return snap.val();
+    } catch (e) { console.error('DB get failed:', path, e); return null; }
+  },
+  async set(path, data) {
+    try {
+      await dbRef(path).set(data);
+    } catch (e) { console.error('DB set failed:', path, e); }
+  },
+  async remove(path) {
+    try {
+      await dbRef(path).remove();
+    } catch (e) { console.error('DB remove failed:', path, e); }
   },
 };
 
@@ -232,92 +252,66 @@ const State = {
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
 
-// ─── Persistence (localStorage) ────────────────────────────────
+// ─── Persistence (Firebase Realtime Database) ────────────────
+// All save/load operations go to Firebase. Writes are fire-and-forget
+// (async but we don't await — keeps the UI snappy). Loads are awaited
+// only during init.
 const Storage = {
-  key: tripId => `tripcraft_${tripId}`,
-  partyKey: 'tripcraft_party',
-  settingsKey: 'tripcraft_settings',
-  importKey: tripId => `tripcraft_${tripId}_imported`,
   save() {
     if (!State.trip) return;
-    try {
-      localStorage.setItem(Storage.key(State.trip.id), JSON.stringify({
-        plan: State.plan,
-        layers: State.layers,
-        selectedDayIndex: State.selectedDayIndex,
-        dayAccAssignments: State.dayAccAssignments,
-        dayTransport: State.dayTransport,
-        dayRouteMode: State.dayRouteMode,
-        dayLabels: State.dayLabels,
-        dayEmojis: State.dayEmojis,
-      }));
-    } catch (e) { /* quota exceeded — ignore */ }
+    DB.set(`trips/${State.trip.id}/plan`, {
+      plan: State.plan,
+      layers: State.layers,
+      selectedDayIndex: State.selectedDayIndex,
+      dayAccAssignments: State.dayAccAssignments,
+      dayTransport: State.dayTransport,
+      dayRouteMode: State.dayRouteMode,
+      dayLabels: State.dayLabels,
+      dayEmojis: State.dayEmojis,
+    });
   },
   saveParty() {
-    try {
-      localStorage.setItem(Storage.partyKey, JSON.stringify(State.partyConfig));
-    } catch (e) {}
+    DB.set('settings/party', State.partyConfig);
   },
   saveSettings() {
-    try {
-      localStorage.setItem(Storage.settingsKey, JSON.stringify(State.settings));
-    } catch (e) {}
+    DB.set('settings/app', State.settings);
   },
   saveImported(tripId) {
-    try {
-      localStorage.setItem(Storage.importKey(tripId), JSON.stringify(State.importedPois));
-    } catch (e) {}
+    DB.set(`trips/${tripId}/imported`, State.importedPois);
   },
-  load(tripId) {
-    try {
-      const raw = localStorage.getItem(Storage.key(tripId));
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+  async load(tripId) {
+    return await DB.get(`trips/${tripId}/plan`);
   },
-  loadParty() {
-    try {
-      const raw = localStorage.getItem(Storage.partyKey);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+  async loadParty() {
+    return await DB.get('settings/party');
   },
-  loadSettings() {
-    try {
-      const raw = localStorage.getItem(Storage.settingsKey);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+  async loadSettings() {
+    return await DB.get('settings/app');
   },
-  loadImported(tripId) {
-    try {
-      const raw = localStorage.getItem(Storage.importKey(tripId));
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) { return []; }
+  async loadImported(tripId) {
+    return (await DB.get(`trips/${tripId}/imported`)) || [];
   },
   clear(tripId) {
-    try { localStorage.removeItem(Storage.key(tripId)); } catch (e) {}
+    DB.remove(`trips/${tripId}`);
   },
-  loadUserTrips() {
-    try { return JSON.parse(localStorage.getItem('tripcraft_user_trips') || '[]'); }
-    catch { return []; }
+  async loadUserTrips() {
+    return (await DB.get('userTrips')) || [];
   },
   saveUserTrips(trips) {
-    try { localStorage.setItem('tripcraft_user_trips', JSON.stringify(trips)); } catch (e) {}
+    DB.set('userTrips', trips);
   },
-  accEditsKey: tripId => `tripcraft_${tripId}_acc_edits`,
-  userAccsKey: tripId => `tripcraft_${tripId}_user_accs`,
   saveAccEdits(tripId) {
-    try { localStorage.setItem(Storage.accEditsKey(tripId), JSON.stringify(State.accEdits)); } catch (e) {}
+    DB.set(`trips/${tripId}/accEdits`, State.accEdits);
   },
-  loadAccEdits(tripId) {
-    try { return JSON.parse(localStorage.getItem(Storage.accEditsKey(tripId)) || '{}'); }
-    catch { return {}; }
+  async loadAccEdits(tripId) {
+    return (await DB.get(`trips/${tripId}/accEdits`)) || {};
   },
   saveUserAccs(tripId) {
     const userAccs = State.trip?.accommodations.filter(a => a.isUserCreated) || [];
-    try { localStorage.setItem(Storage.userAccsKey(tripId), JSON.stringify(userAccs)); } catch (e) {}
+    DB.set(`trips/${tripId}/userAccs`, userAccs);
   },
-  loadUserAccs(tripId) {
-    try { return JSON.parse(localStorage.getItem(Storage.userAccsKey(tripId)) || '[]'); }
-    catch { return []; }
+  async loadUserAccs(tripId) {
+    return (await DB.get(`trips/${tripId}/userAccs`)) || [];
   },
 };
 
@@ -3879,14 +3873,14 @@ function closeTripSelector() {
 }
 
 // ─── Trip Loading ──────────────────────────────────────────────
-function loadTrip(tripId) {
+async function loadTrip(tripId) {
   const trip = tripRegistry.find(t => t.id === tripId);
   if (!trip) { console.error('Trip not found:', tripId); return; }
   State.trip = trip;
   document.getElementById('trip-selector')?.classList.add('hidden');
 
-  // Restore or initialize plan
-  const saved = Storage.load(tripId);
+  // Restore or initialize plan (async — reads from Firebase)
+  const saved = await Storage.load(tripId);
   if (saved) {
     State.plan = saved.plan ?? {};
     if (saved.layers) {
@@ -3916,15 +3910,15 @@ function loadTrip(tripId) {
   }
 
   // Load party config and settings
-  const savedParty = Storage.loadParty();
+  const savedParty = await Storage.loadParty();
   if (savedParty && Array.isArray(savedParty)) State.partyConfig = savedParty;
 
-  const savedSettings = Storage.loadSettings();
+  const savedSettings = await Storage.loadSettings();
   if (savedSettings) Object.assign(State.settings, savedSettings);
 
   // Load accommodation edits + user-created accommodations
-  State.accEdits = Storage.loadAccEdits(tripId);
-  const userAccs = Storage.loadUserAccs(tripId);
+  State.accEdits = await Storage.loadAccEdits(tripId);
+  const userAccs = await Storage.loadUserAccs(tripId);
   userAccs.forEach(acc => {
     if (!State.trip.accommodations.find(a => a.id === acc.id)) {
       State.trip.accommodations.push(acc);
@@ -3932,7 +3926,7 @@ function loadTrip(tripId) {
   });
 
   // Load previously imported POIs
-  const importedPois = Storage.loadImported(tripId);
+  const importedPois = await Storage.loadImported(tripId);
   State.importedPois = importedPois;
   importedPois.forEach(poi => {
     if (!State.trip.pois.find(p => p.id === poi.id)) {
@@ -4511,13 +4505,11 @@ window.App = {
 // ─── Initialization ────────────────────────────────────────────
 let _appBooted = false;
 
-function init() {
-  // Auth gate
-  if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== '__YOUR_GOOGLE_CLIENT_ID__') {
-    if (!Auth.user) {
-      Auth.init();
-      if (!Auth.user) return; // will call init() again after sign-in
-    }
+async function init() {
+  // Auth gate — wait for Firebase auth state
+  if (!Auth.user) {
+    const signedIn = await Auth.init();
+    if (!signedIn) return; // shows sign-in gate; onAuthStateChanged will re-trigger
   }
   // Ensure app is visible
   document.getElementById('auth-gate').style.display = 'none';
@@ -4573,8 +4565,9 @@ function init() {
 
   } // end of one-time boot
 
-  // Merge user-created trips from localStorage into the live registry
-  Storage.loadUserTrips().forEach(t => {
+  // Merge user-created trips from Firebase into the live registry
+  const userTrips = await Storage.loadUserTrips();
+  userTrips.forEach(t => {
     if (!window._tripRegistry.find(x => x.id === t.id)) {
       window._tripRegistry.push(t);
     }
@@ -4586,7 +4579,7 @@ function init() {
   }
 
   if (tripRegistry.length === 1) {
-    loadTrip(tripRegistry._arr[0].id);
+    await loadTrip(tripRegistry._arr[0].id);
   } else {
     showTripSelector(tripRegistry._arr);
   }

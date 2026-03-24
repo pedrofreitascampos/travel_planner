@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "users": {
+      "shared": {
+        ".read": "auth != null && (auth.token.email === 'pedrofreitascampos@gmail.com' || auth.token.email === 'faye.anson@gmail.com')",
+        ".write": "auth != null && (auth.token.email === 'pedrofreitascampos@gmail.com' || auth.token.email === 'faye.anson@gmail.com')"
+      }
+    }
+  }
+}
