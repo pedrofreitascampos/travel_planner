@@ -599,25 +599,12 @@ function calcDayMetrics(dayIndex, routeDistKm) {
     interCityKm = Math.round(haversineKm(dc.lat, dc.lng, ac.lat, ac.lng) * 1.3); // ~30% road factor
   }
   const hasInterCity = interCityKm > 0;
-  const transportType = dayTransportOverride.type || (hasInterCity ? 'driving' : null);
   let fuelCost = 0;
   let transportCost = 0;
-  // In-city driving fuel (only when day's route mode is driving, not walking)
   const inCityDriveKm = (routeDistKm != null && dayMode === 'driving') ? routeDistKm : 0;
-  if (hasInterCity) {
-    if (transportType === 'driving') {
-      const totalKm = interCityKm + inCityDriveKm;
-      fuelCost = (totalKm / 100) * carConsumption * fuelPrice;
-      transportCost = fuelCost;
-    } else if (dayTransportOverride.costPerPerson) {
-      transportCost = dayTransportOverride.costPerPerson * partySize;
-      if (inCityDriveKm > 0) {
-        fuelCost = (inCityDriveKm / 100) * carConsumption * fuelPrice;
-        transportCost += fuelCost;
-      }
-    }
-  } else if (inCityDriveKm > 0) {
-    fuelCost = (inCityDriveKm / 100) * carConsumption * fuelPrice;
+  const totalDriveKm = interCityKm + inCityDriveKm;
+  if (totalDriveKm > 0) {
+    fuelCost = (totalDriveKm / 100) * carConsumption * fuelPrice;
     transportCost = fuelCost;
   }
   const dayAcc = getEffectiveAcc(day.date);
@@ -798,10 +785,8 @@ function calcDayMetrics(dayIndex, routeDistKm) {
     mealParts.push(`${unplannedMeals} unplanned (€${(dailyMealBudget/mealsPerDay).toFixed(0)}/meal/pp × ${partySize} = €${unplannedMealsCost.toFixed(0)})`);
   }
   costLines.push(`Meals: ${mealParts.join(' + ')} = €${mealsCost.toFixed(0)}`);
-  if (hasInterCity && transportType === 'driving') {
-    costLines.push(`Fuel: ${interCityKm}${inCityDriveKm > 0 ? '+' + inCityDriveKm.toFixed(0) : ''} km × ${carConsumption}L/100km × €${fuelPrice}/L = €${fuelCost.toFixed(0)}`);
-  } else if (transportCost > 0) {
-    costLines.push(`Transport: €${(dayTransportOverride.costPerPerson || 0)}/person × ${partySize} = €${(dayTransportOverride.costPerPerson || 0) * partySize}`);
+  if (totalDriveKm > 0) {
+    costLines.push(`Fuel: ${interCityKm > 0 ? interCityKm : ''}${interCityKm > 0 && inCityDriveKm > 0 ? '+' : ''}${inCityDriveKm > 0 ? inCityDriveKm.toFixed(0) : ''} km × ${carConsumption}L/100km × €${fuelPrice}/L = €${fuelCost.toFixed(0)}`);
   }
   if (accCost > 0) costLines.push(`Accommodation: €${accCost.toFixed(0)}/night`);
   costLines.push(`Total: €${totalCost.toFixed(0)}`);
@@ -1219,17 +1204,11 @@ function fitMapToDay(dayIndex) {
 
 async function drawRoute(dayIndex) {
   if (!State.map) return;
-  // Draw inter-city route separately only for flights (GCC arc)
-  const dayTransportCheck = State.dayTransport[getDay(dayIndex)?.date] || {};
-  if (dayTransportCheck.type === 'flight') {
-    drawInterCityRoute(dayIndex);
-  } else {
-    // Clear any stale inter-city route — unified route handles everything
-    if (State.interCityPolyline) {
-      if (Array.isArray(State.interCityPolyline)) State.interCityPolyline.forEach(l => State.map.removeLayer(l));
-      else State.map.removeLayer(State.interCityPolyline);
-      State.interCityPolyline = null;
-    }
+  // Clear any stale inter-city route layers
+  if (State.interCityPolyline) {
+    if (Array.isArray(State.interCityPolyline)) State.interCityPolyline.forEach(l => State.map.removeLayer(l));
+    else State.map.removeLayer(State.interCityPolyline);
+    State.interCityPolyline = null;
   }
   if (State.routePolyline) {
     State.map.removeLayer(State.routePolyline);
@@ -1452,14 +1431,13 @@ async function drawInterCityRoute(dayIndex) {
 // ─── Effective Day Label ────────────────────────────────────────
 function getEffectiveDayLabel(day) {
   if (State.dayLabels?.[day.date]) return State.dayLabels[day.date];
-  // Use accommodation's location field (city name), not its name
+  // Derive from arrival accommodation's location
   const acc = getEffectiveAcc(day.date);
   if (acc) {
     const edit = State.accEdits[acc.id] || {};
-    // Prefer .location (e.g. "Mértola, Portugal"), fall back to .name
     const loc = acc.location || edit.name || acc.name || '';
     const city = loc.split(',')[0].replace(/^(Accommodation|Home)\s*[—–-]\s*/i, '').trim();
-    if (city && city !== day.label) return city;
+    if (city) return city;
   }
   return day.label;
 }
@@ -1595,45 +1573,19 @@ function renderDayPlanContent(dayIndex) {
   if (arrivalAcc && departureAcc && arrivalAcc.id === departureAcc.id && day.driving) arrivalAcc = getHomeAcc();
   const hasInterCity = (departureAcc && arrivalAcc && departureAcc.id !== arrivalAcc.id) || !!day.driving;
 
-  // Transport info
-  const TRANSPORT_TYPES = [
-    { type: 'driving', icon: '🚗', label: 'Drive' },
-    { type: 'flight',  icon: '✈️', label: 'Flight' },
-    { type: 'train',   icon: '🚂', label: 'Train' },
-    { type: 'bus',     icon: '🚌', label: 'Bus' },
-  ];
-  const dayTransport = State.dayTransport[day.date] || {};
-  const tType  = dayTransport.type || 'driving';
-  const tInfo  = TRANSPORT_TYPES.find(t => t.type === tType) || TRANSPORT_TYPES[0];
+  // Transport info (driving only)
   const km = day.driving?.approxKm || 0;
-  let displayMin;
-  if (dayTransport.durationMin) displayMin = dayTransport.durationMin;
-  else if (tType === 'flight')  displayMin = Math.ceil(km / 800 * 60) + 90 + 90;
-  else if (tType === 'driving') displayMin = day.driving?.approxMin;
-  else                          displayMin = Math.ceil(km / ({ train: 150, bus: 60 }[tType] || 80) * 60);
-  const costPerPersonField = tType !== 'driving' ? `
-    <div class="transport-cost-row">
-      <span class="transport-cost-label">€/person:</span>
-      <input type="number" class="transport-cost-input" min="0" step="1"
-        value="${dayTransport.costPerPerson || ''}" placeholder="0"
-        onchange="App.setTransportCost('${day.date}', this.value)">
-    </div>` : '';
-  const typeButtons = TRANSPORT_TYPES.map(t =>
-    `<button class="transport-type-btn${t.type === tType ? ' active' : ''}"
-      onclick="App.setTransportType('${day.date}', '${t.type}')"
-      title="${t.label}">${t.icon}</button>`
-  ).join('');
+  const displayMin = day.driving?.approxMin || 0;
 
   const depCity = departureAcc?.location?.split(',')[0] || '';
   const arrCity = arrivalAcc?.location?.split(',')[0] || '';
   const drivingHtml = hasInterCity ? `
     <div class="drive-info">
-      <div class="drive-info-icon">${tInfo.icon}</div>
+      <div class="drive-info-icon">🚗</div>
       <div class="drive-info-text">
         <div class="drive-info-label">${esc(day.driving?.from || depCity)} → ${esc(day.driving?.to || arrCity)}</div>
         ${km > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
       </div>
-      <div class="transport-type-group">${typeButtons}${costPerPersonField}</div>
     </div>` : '';
 
   const allAccs = State.trip.accommodations;
