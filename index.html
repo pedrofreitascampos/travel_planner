@@ -10,6 +10,9 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
   <title>TripCraft — Travel Planner</title>
 
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
@@ -19,9 +22,21 @@
 <body>
 
 <!-- ═══════════════════════════════════════════════════════════
+     SIGN-IN GATE
+═══════════════════════════════════════════════════════════ -->
+<div id="auth-gate">
+  <div class="auth-card">
+    <div class="auth-logo">✈️</div>
+    <div class="auth-title">TripCraft</div>
+    <div class="auth-subtitle">Sign in to plan your trip</div>
+    <div id="g-signin-btn"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
      APP SHELL
 ═══════════════════════════════════════════════════════════ -->
-<div id="app">
+<div id="app" style="display:none">
 
   <!-- ─── Header ───────────────────────────────────────── -->
   <header id="app-header">

@@ -5,6 +5,115 @@
 
 'use strict';
 
+// ─── Google Auth ──────────────────────────────────────────────
+// Replace with your Google OAuth Client ID
+const GOOGLE_CLIENT_ID = '__YOUR_GOOGLE_CLIENT_ID__';
+// Allowed emails — leave empty [] to allow anyone, or add specific emails
+const ALLOWED_EMAILS = []; // e.g. ['you@gmail.com', 'wife@gmail.com']
+
+const Auth = {
+  user: null, // { name, email, picture, credential }
+
+  init() {
+    // Check for saved session
+    try {
+      const saved = localStorage.getItem('tripcraft_auth');
+      if (saved) {
+        const data = JSON.parse(saved);
+        // JWT tokens expire — check if it's still recent (7 days)
+        if (data.exp && data.exp > Date.now()) {
+          Auth.user = data;
+          Auth.showApp();
+          return;
+        }
+      }
+    } catch {}
+
+    // No valid session — show sign-in gate
+    Auth.showGate();
+  },
+
+  showGate() {
+    document.getElementById('auth-gate').style.display = '';
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('bottom-sheet')?.style.setProperty('display', 'none');
+
+    // Render Google Sign-In button
+    if (window.google?.accounts?.id) {
+      Auth._renderButton();
+    } else {
+      // GIS library not loaded yet — wait for it
+      window.addEventListener('load', () => setTimeout(() => Auth._renderButton(), 200));
+    }
+  },
+
+  _renderButton() {
+    if (!window.google?.accounts?.id) return;
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: Auth.onSignIn,
+    });
+    google.accounts.id.renderButton(
+      document.getElementById('g-signin-btn'),
+      { theme: 'outline', size: 'large', shape: 'pill', width: 260 }
+    );
+  },
+
+  onSignIn(response) {
+    try {
+      const payload = JSON.parse(atob(response.credential.split('.')[1]));
+      // Check email allowlist
+      if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(payload.email)) {
+        alert(`Access denied for ${payload.email}.\nContact the trip owner to be added.`);
+        return;
+      }
+      Auth.user = {
+        name: payload.name,
+        email: payload.email,
+        picture: payload.picture,
+        exp: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 day session
+      };
+      localStorage.setItem('tripcraft_auth', JSON.stringify(Auth.user));
+      Auth.showApp();
+      init(); // boot the app
+    } catch (e) {
+      console.error('Sign-in failed:', e);
+    }
+  },
+
+  showApp() {
+    document.getElementById('auth-gate').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    document.getElementById('bottom-sheet')?.style.removeProperty('display');
+    Auth.updateHeaderUser();
+  },
+
+  updateHeaderUser() {
+    if (!Auth.user) return;
+    const existing = document.getElementById('auth-user-badge');
+    if (existing) existing.remove();
+    const badge = document.createElement('div');
+    badge.id = 'auth-user-badge';
+    badge.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:auto;cursor:pointer;';
+    badge.title = `${Auth.user.name}\n${Auth.user.email}\nClick to sign out`;
+    badge.innerHTML = `<img src="${Auth.user.picture}" style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);" referrerpolicy="no-referrer">`;
+    badge.onclick = () => {
+      if (confirm('Sign out?')) Auth.signOut();
+    };
+    const header = document.getElementById('app-header');
+    const spacer = header?.querySelector('.header-spacer');
+    if (spacer) spacer.after(badge);
+    else header?.appendChild(badge);
+  },
+
+  signOut() {
+    localStorage.removeItem('tripcraft_auth');
+    Auth.user = null;
+    google?.accounts?.id?.disableAutoSelect();
+    location.reload();
+  },
+};
+
 // ─── Trip Registry ─────────────────────────────────────────────
 // window._tripRegistry is populated by trip data files loaded before this script.
 // We use a live getter so this always reflects the populated array at call time,
@@ -4400,6 +4509,12 @@ window.App = {
 
 // ─── Initialization ────────────────────────────────────────────
 function init() {
+  // Auth gate — if no valid session, show sign-in and stop
+  if (GOOGLE_CLIENT_ID !== '__YOUR_GOOGLE_CLIENT_ID__') {
+    Auth.init();
+    if (!Auth.user) return; // will call init again after sign-in via showApp → reload
+  }
+
   State.isMobile = window.innerWidth < 768;
 
   // Inject modals into DOM
