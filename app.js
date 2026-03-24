@@ -2190,7 +2190,7 @@ function setMapStyle(style) {
 }
 
 // ─── Weather Overlays (OpenWeatherMap) ──────────────────────────
-const OWM_KEY = ''; // Set your OpenWeatherMap API key here (free tier)
+let OWM_KEY = ''; // Loaded from Firebase settings on init
 const _weatherOverlays = {};
 
 function toggleWeatherOverlay(type, show) {
@@ -2365,6 +2365,8 @@ function openSettingsModal() {
   const routeRadInput = document.getElementById('settings-route-radius');
   if (radInput) radInput.value = State.settings.discoveryRadius;
   if (routeRadInput) routeRadInput.value = State.settings.routeDiscoveryRadius;
+  const owmInput = document.getElementById('settings-owm-key');
+  if (owmInput) owmInput.value = OWM_KEY;
 
   updatePartyPreview();
   modal.classList.remove('hidden');
@@ -2406,6 +2408,11 @@ function saveSettings() {
   const routeRadInput = document.getElementById('settings-route-radius');
   if (radInput) State.settings.discoveryRadius = parseFloat(radInput.value) || 5;
   if (routeRadInput) State.settings.routeDiscoveryRadius = parseFloat(routeRadInput.value) || 3;
+  const owmInput = document.getElementById('settings-owm-key');
+  if (owmInput?.value.trim()) {
+    OWM_KEY = owmInput.value.trim();
+    DB.set('settings/owmKey', OWM_KEY);
+  }
 
   Storage.saveParty();
   Storage.saveSettings();
@@ -3984,6 +3991,8 @@ async function loadTrip(tripId) {
   // Load party config and settings
   const savedParty = await Storage.loadParty();
   if (savedParty && Array.isArray(savedParty)) State.partyConfig = savedParty;
+  const savedOwmKey = await DB.get('settings/owmKey');
+  if (savedOwmKey) OWM_KEY = savedOwmKey;
 
   const savedSettings = await Storage.loadSettings();
   if (savedSettings) Object.assign(State.settings, savedSettings);
@@ -4107,6 +4116,11 @@ function injectModals() {
             <label class="settings-label">Along route (km)</label>
             <input type="number" id="settings-route-radius" class="settings-input" min="1" max="30" step="1" placeholder="3">
           </div>
+        </div>
+        <div class="settings-divider">API Keys</div>
+        <div class="settings-field">
+          <label class="settings-label">OpenWeatherMap key (for rain/cloud overlays)</label>
+          <input type="text" id="settings-owm-key" class="settings-input" placeholder="Get free key at openweathermap.org">
         </div>
       </div>
       <div class="modal-actions">
