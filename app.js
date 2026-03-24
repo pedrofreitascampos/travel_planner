@@ -3396,6 +3396,7 @@ function savePoiEdit(poiId) {
   Storage.savePoiEdits(State.trip.id);
   document.getElementById('poi-edit-modal')?.classList.add('hidden');
   placeMarkers(); renderAll();
+  renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   showToast('Place updated');
 }
 
