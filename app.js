@@ -1025,9 +1025,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
     <div class="party-info-line">
       👨‍👩‍👧‍👦 ${esc(partyDesc)}${esc(kidsStr)} · <a href="#" onclick="event.preventDefault();App.openSettingsModal()" class="party-settings-link">Settings</a>
     </div>
-    <details class="metrics-details">
-      <summary title="Expand to see cost breakdown, score bars, radar chart, and suggestions">📊 Day Analysis</summary>
-      <div class="metrics-details-inner">
+    <div class="metrics-details-inner">
         <div class="metric-section">
           <div class="metric-section-title">💰 Estimated Cost</div>
           <div class="cost-breakdown">
@@ -1055,7 +1053,6 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
         </div>
         ${suggestionsHtml}
       </div>
-    </details>
   `;
 
   document.querySelectorAll('.day-metrics-widget').forEach(el => {
@@ -1110,17 +1107,21 @@ function makeAccIcon() {
 function buildPopupHTML(poi) {
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
   const booked = poi.confirmedBooking
-    ? `<span style="background:#fdf3ce;color:#7a5900;border-radius:3px;padding:1px 5px;font-size:10px;font-weight:600;">⭐ Booked</span>`
+    ? (poi.bookingTime ? `<span style="background:#e8f5e9;color:#2e7d32;border-radius:3px;padding:1px 5px;font-size:10px;font-weight:600;">🕐 ${esc(poi.bookingTime)}</span>` : `<span style="background:#fdf3ce;color:#7a5900;border-radius:3px;padding:1px 5px;font-size:10px;font-weight:600;">✅ Booked</span>`)
     : '';
-  return `<div style="padding:10px 12px;min-width:160px;">
-    <div style="font-weight:600;font-size:13px;margin-bottom:4px;line-height:1.3;">${esc(poi.name)}</div>
-    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#666;flex-wrap:wrap;margin-bottom:6px;">
+  const costStr = poi.costAmount > 0 ? `€${poi.costAmount} pp` : 'Free';
+  const starsHtml = poi.rating ? `<span style="color:#f0c040;font-size:10px;">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : '';
+  return `<div style="padding:10px 12px;min-width:180px;">
+    <div style="font-weight:600;font-size:13px;margin-bottom:4px;line-height:1.3;">${esc(poi.name)} ${starsHtml}</div>
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#666;flex-wrap:wrap;margin-bottom:4px;">
       <span>${cat.icon} ${cat.label}</span>
       <span>⏱ ${poi.duration}h</span>
+      <span>💰 ${costStr}</span>
       ${booked}
     </div>
+    <div style="font-size:11px;color:#888;margin-bottom:6px;">${getKidsHtml(poi.kidsRating || poi.kidsFriendly || 3)}</div>
     <button onclick="App.openDetail('${poi.id}')"
-      style="display:block;width:100%;padding:5px 8px;background:#e07b54;color:white;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
+      style="display:block;width:100%;padding:5px 8px;background:var(--color-accent);color:white;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
       View Details
     </button>
   </div>`;
@@ -1682,12 +1683,7 @@ function renderDayPlanContent(dayIndex) {
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
 
-  // Collapse same-location accommodations into a single line
-  const sameLocation = departureAcc && arrivalAcc && departureAcc.id === arrivalAcc.id;
-  const accSummaryHtml = sameLocation
-    ? `<div class="acc-card"><div class="acc-icon">🏨</div><div class="acc-info"><div class="acc-name">${esc((State.accEdits[arrivalAcc.id]?.name || arrivalAcc.name))}</div></div>
-        <button class="btn-icon btn-edit-sm" onclick="App.openAccEditModal('${arrivalAcc.id}')">✏️</button></div>`
-    : `${departCardHtml}${arriveCardHtml}`;
+  const accSummaryHtml = `${departCardHtml}${arriveCardHtml}`;
 
   const contentHtml = `
     <div class="day-header">
@@ -1809,7 +1805,7 @@ function buildPoiCardHtml(poiId, idx) {
     <div class="drag-handle" title="Drag to reorder">⠿</div>
     <div class="poi-thumb" id="pt-${poiId}"><span class="thumb-fallback">${cat.icon}</span></div>
     <div class="poi-info">
-      <div class="poi-card-name" title="${esc(poi.name)}">${esc(poi.name)}</div>
+      <div class="poi-card-name" title="${esc(poi.name)}">${esc(poi.name)}${poi.rating ? ` <span class="poi-stars">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : ''}</div>
       <div class="poi-card-meta">
         ${getCostHtml(poi)}
         <span class="badge badge-duration">⏱ ${poi.duration}h</span>
