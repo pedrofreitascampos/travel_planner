@@ -114,6 +114,29 @@
             </div>
           </div>
 
+          <!-- Weather overlays -->
+          <div class="layer-panel-section">
+            <div class="layer-panel-title">Weather Overlay</div>
+            <label class="layer-toggle">
+              <input type="checkbox" id="toggle-rain"
+                onchange="App.toggleWeatherOverlay('rain', this.checked)">
+              <span class="toggle-track"></span>
+              <span class="toggle-label">🌧️ Rain</span>
+            </label>
+            <label class="layer-toggle">
+              <input type="checkbox" id="toggle-clouds"
+                onchange="App.toggleWeatherOverlay('clouds', this.checked)">
+              <span class="toggle-track"></span>
+              <span class="toggle-label">☁️ Clouds</span>
+            </label>
+            <label class="layer-toggle">
+              <input type="checkbox" id="toggle-temp"
+                onchange="App.toggleWeatherOverlay('temp', this.checked)">
+              <span class="toggle-track"></span>
+              <span class="toggle-label">🌡️ Temperature</span>
+            </label>
+          </div>
+
         </div><!-- /layer-panel -->
       </div><!-- /layer-controls -->
 
@@ -180,11 +203,11 @@
 <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
 
 <!-- Trip data files (synchronous — populate window._tripRegistry) -->
-<script src="trips/seville-2026.js?v=5"></script>
+<script src="trips/seville-2026.js?v=6"></script>
 
 <!-- App logic: defer ensures it runs AFTER all synchronous scripts above
      have fully executed, so window._tripRegistry is always populated -->
-<script src="app.js?v=5" defer></script>
+<script src="app.js?v=6" defer></script>
 
 </body>
 </html>

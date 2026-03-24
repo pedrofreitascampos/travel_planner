@@ -2193,6 +2193,40 @@ function setMapStyle(style) {
   });
 }
 
+// ─── Weather Overlays (OpenWeatherMap) ──────────────────────────
+const OWM_KEY = ''; // Set your OpenWeatherMap API key here (free tier)
+const _weatherOverlays = {};
+
+function toggleWeatherOverlay(type, show) {
+  if (!State.map) return;
+  if (!OWM_KEY) {
+    showToast('Set your OpenWeatherMap API key in app.js (OWM_KEY)');
+    // Uncheck the toggle
+    const el = document.getElementById(`toggle-${type === 'rain' ? 'rain' : type === 'clouds' ? 'clouds' : 'temp'}`);
+    if (el) el.checked = false;
+    return;
+  }
+  if (show) {
+    const layerMap = {
+      rain: 'precipitation_new',
+      clouds: 'clouds_new',
+      temp: 'temp_new',
+    };
+    const layerId = layerMap[type];
+    if (!layerId) return;
+    if (_weatherOverlays[type]) State.map.removeLayer(_weatherOverlays[type]);
+    _weatherOverlays[type] = L.tileLayer(
+      `https://tile.openweathermap.org/map/${layerId}/{z}/{x}/{y}.png?appid=${OWM_KEY}`,
+      { opacity: 0.5, maxZoom: 19, attribution: '© OpenWeatherMap' }
+    ).addTo(State.map);
+  } else {
+    if (_weatherOverlays[type]) {
+      State.map.removeLayer(_weatherOverlays[type]);
+      delete _weatherOverlays[type];
+    }
+  }
+}
+
 function syncLayerUI() {
   const map = {
     'toggle-my-pois': State.layers.showUser,
@@ -4487,6 +4521,7 @@ window.App = {
   toggleCategory,
   setRouteMode,
   setMapStyle,
+  toggleWeatherOverlay,
   loadTrip,
   openSettingsModal,
   closeSettingsModal,
