@@ -313,6 +313,23 @@ const Storage = {
   async loadUserAccs(tripId) {
     return (await DB.get(`trips/${tripId}/userAccs`)) || [];
   },
+  savePoiEdits(tripId) {
+    // Save editable fields for ALL POIs (bundled + imported)
+    const edits = {};
+    State.trip?.pois.forEach(p => {
+      edits[p.id] = {
+        name: p.name, category: p.category, emoji: p.emoji,
+        duration: p.duration, costAmount: p.costAmount, costLabel: p.costLabel,
+        kidsFriendly: p.kidsFriendly, kidsRating: p.kidsRating,
+        description: p.description, confirmedBooking: p.confirmedBooking,
+        bookingTime: p.bookingTime || '', bookingRef: p.bookingRef || '',
+      };
+    });
+    DB.set(`trips/${tripId}/poiEdits`, edits);
+  },
+  async loadPoiEdits(tripId) {
+    return (await DB.get(`trips/${tripId}/poiEdits`)) || {};
+  },
 };
 
 // ─── Pure Utility Functions ────────────────────────────────────
@@ -1156,10 +1173,10 @@ function placeMarkers() {
       if (!State.layers.categories[poi.category]) return;
       const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
       const icon = L.divIcon({
-        html: `<div style="width:22px;height:22px;border-radius:50%;background:${cat.color};border:2px solid rgba(255,255,255,0.7);box-shadow:0 1px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:11px;opacity:0.3;">${cat.icon}</div>`,
+        html: `<div style="width:34px;height:34px;border-radius:50%;background:${cat.color};border:2.5px dashed rgba(255,255,255,0.8);box-shadow:0 2px 6px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.55;">${cat.icon}</div>`,
         className: '',
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
         popupAnchor: [0, -12],
       });
       const m = L.marker([poi.lat, poi.lng], { icon })
@@ -3354,6 +3371,8 @@ function savePoiEdit(poiId) {
   poi.bookingTime = booked ? (document.getElementById('pe-booking-time')?.value || '') : '';
   poi.bookingRef  = booked ? (document.getElementById('pe-booking-ref')?.value.trim() || '') : '';
   if (['imported', 'custom', 'discovered'].includes(poi.source)) Storage.saveImported(State.trip.id);
+  // Save edits for ALL POIs (including bundled trip POIs) to Firebase
+  Storage.savePoiEdits(State.trip.id);
   document.getElementById('poi-edit-modal')?.classList.add('hidden');
   placeMarkers(); renderAll();
   showToast('Place updated');
@@ -3977,6 +3996,23 @@ async function loadTrip(tripId) {
     }
   });
 
+  // Apply saved POI edits (covers both bundled and imported POIs)
+  const poiEdits = await Storage.loadPoiEdits(tripId);
+  State.trip.pois.forEach(poi => {
+    const edit = poiEdits[poi.id];
+    if (!edit) return;
+    if (edit.name) poi.name = edit.name;
+    if (edit.category) poi.category = edit.category;
+    poi.emoji = edit.emoji ?? poi.emoji;
+    if (edit.duration != null) poi.duration = edit.duration;
+    if (edit.costAmount != null) { poi.costAmount = edit.costAmount; poi.costLabel = edit.costLabel; }
+    if (edit.kidsFriendly != null) { poi.kidsFriendly = edit.kidsFriendly; poi.kidsRating = edit.kidsRating; }
+    if (edit.description != null) poi.description = edit.description;
+    poi.confirmedBooking = edit.confirmedBooking ?? poi.confirmedBooking;
+    poi.bookingTime = edit.bookingTime ?? poi.bookingTime;
+    poi.bookingRef = edit.bookingRef ?? poi.bookingRef;
+  });
+
   // Header — editable title for user-created trips
   const titleEl = document.querySelector('.header-title');
   titleEl.textContent = trip.name;
@@ -4451,18 +4487,10 @@ function injectHeaderButtons() {
   btnOverview.onclick = () => App.openTripOverviewModal();
   btnOverview.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
 
-  const btnSettings = document.createElement('button');
-  btnSettings.id = 'btn-settings';
-  btnSettings.title = 'Trip settings';
-  btnSettings.textContent = '⚙️';
-  btnSettings.onclick = () => App.openSettingsModal();
-  btnSettings.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
-
   header.appendChild(btnPin);
   header.appendChild(btnImport);
   header.appendChild(btnShare);
   header.appendChild(btnOverview);
-  header.appendChild(btnSettings);
 }
 
 // ─── Public API ────────────────────────────────────────────────
