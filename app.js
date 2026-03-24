@@ -1431,13 +1431,16 @@ async function drawInterCityRoute(dayIndex) {
 // ─── Effective Day Label ────────────────────────────────────────
 function getEffectiveDayLabel(day) {
   if (State.dayLabels?.[day.date]) return State.dayLabels[day.date];
-  // Derive from arrival accommodation's location
+  // Derive from arrival accommodation's location/name
   const acc = getEffectiveAcc(day.date);
   if (acc) {
     const edit = State.accEdits[acc.id] || {};
-    const loc = acc.location || edit.name || acc.name || '';
-    const city = loc.split(',')[0].replace(/^(Accommodation|Home)\s*[—–-]\s*/i, '').trim();
-    if (city) return city;
+    // Try location first ("Mértola, Portugal" → "Mértola"), then edited name, then acc name
+    for (const src of [acc.location, edit.name, acc.name]) {
+      if (!src) continue;
+      const city = src.split(',')[0].replace(/^(Accommodation|Home|New)\s*[—–-]?\s*/i, '').trim();
+      if (city && city.length > 1) return city;
+    }
   }
   return day.label;
 }
@@ -1577,13 +1580,19 @@ function renderDayPlanContent(dayIndex) {
   const km = day.driving?.approxKm || 0;
   const displayMin = day.driving?.approxMin || 0;
 
-  const depCity = departureAcc?.location?.split(',')[0] || '';
-  const arrCity = arrivalAcc?.location?.split(',')[0] || '';
+  const accCityName = (acc) => {
+    if (!acc) return '';
+    const edit = State.accEdits[acc.id] || {};
+    const loc = acc.location || edit.name || acc.name || '';
+    return loc.split(',')[0].replace(/^(Accommodation|Home)\s*[—–-]\s*/i, '').trim();
+  };
+  const depCity = accCityName(departureAcc);
+  const arrCity = accCityName(arrivalAcc);
   const drivingHtml = hasInterCity ? `
     <div class="drive-info">
       <div class="drive-info-icon">🚗</div>
       <div class="drive-info-text">
-        <div class="drive-info-label">${esc(day.driving?.from || depCity)} → ${esc(day.driving?.to || arrCity)}</div>
+        <div class="drive-info-label">${esc(depCity)} → ${esc(arrCity)}</div>
         ${km > 0 ? `<div class="drive-info-detail">${formatDuration(displayMin)} · ${km} km</div>` : ''}
       </div>
     </div>` : '';
@@ -1607,13 +1616,13 @@ function renderDayPlanContent(dayIndex) {
     if (!departureAcc) return '';
     const edit = State.accEdits[departureAcc.id] || {};
     const name = edit.name || departureAcc.name;
-    const loc = departureAcc.location?.split(',')[0] || '';
+    const city = accCityName(departureAcc);
     return `
     <div class="acc-card acc-depart">
       <div class="acc-icon">${departureAcc.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
         <div class="acc-name"><span class="text-xs text-secondary">Depart — </span>${esc(name)}</div>
-        ${loc ? `<div class="acc-note">${esc(loc)}</div>` : ''}
+        ${city ? `<div class="acc-note">${esc(city)}</div>` : ''}
       </div>
     </div>`;
   })();
@@ -1622,14 +1631,14 @@ function renderDayPlanContent(dayIndex) {
   const arriveCardHtml = (() => {
     const edit = arrivalAcc ? (State.accEdits[arrivalAcc.id] || {}) : {};
     const priceStr = edit.pricePerNight ? ` · €${parseFloat(edit.pricePerNight).toFixed(0)}/night` : '';
-    const loc = arrivalAcc?.location?.split(',')[0] || '';
+    const city = accCityName(arrivalAcc);
     const notes = arrivalAcc ? (edit.notes !== undefined ? edit.notes : (arrivalAcc.notes || '')) : '';
     return `
     <div class="acc-card acc-arrive">
       <div class="acc-icon">${arrivalAcc?.isHome ? '🏠' : '🏨'}</div>
       <div class="acc-info">
         <div class="acc-name"><span class="text-xs text-secondary">Arrive — </span>${accSelectHtml(arrivalAcc?.id || '', day.date)}</div>
-        <div class="acc-note">${[loc, notes, priceStr].filter(Boolean).join(' · ')}</div>
+        <div class="acc-note">${[city, notes, priceStr].filter(Boolean).join(' · ')}</div>
       </div>
       ${arrivalAcc && !arrivalAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${arrivalAcc.id}')" title="Edit accommodation">✏️</button>` : ''}
     </div>`;
