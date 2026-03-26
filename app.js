@@ -4392,10 +4392,6 @@ function injectModals() {
           <input type="text" id="ae-name" class="settings-input" placeholder="Accommodation name">
         </div>
         <div class="settings-field">
-          <label class="settings-label">Notes</label>
-          <input type="text" id="ae-notes" class="settings-input" placeholder="e.g. City center, breakfast included">
-        </div>
-        <div class="settings-field">
           <label class="settings-label">Price per night (€)</label>
           <input type="number" id="ae-price" class="settings-input" min="0" step="1" placeholder="0">
           <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Added to each night's total cost</div>
@@ -4422,6 +4418,10 @@ function injectModals() {
             <input type="number" id="ae-lat" class="settings-input" step="0.0001" placeholder="lat" style="flex:1">
             <input type="number" id="ae-lng" class="settings-input" step="0.0001" placeholder="lng" style="flex:1">
           </div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Notes</label>
+          <input type="text" id="ae-notes" class="settings-input" placeholder="e.g. City center, breakfast included">
         </div>
       </div>
       <div class="modal-actions">
