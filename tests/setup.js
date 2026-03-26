@@ -296,6 +296,12 @@ function createTestContext() {
     window.saveAccEdit = saveAccEdit;
     window.savePoiEdit = savePoiEdit;
     window._pendingNewAccId = typeof _pendingNewAccId !== 'undefined' ? _pendingNewAccId : null;
+    window.isGoogleMode = isGoogleMode;
+    window.trackApiRequest = trackApiRequest;
+    window.resetApiQuota = resetApiQuota;
+    window.loadApiQuota = loadApiQuota;
+    window.updateQuotaDisplay = updateQuotaDisplay;
+    window.setMapStyle = setMapStyle;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });
@@ -374,6 +380,7 @@ function installMockTrip(ctx) {
     dailyMealBudget: 22,
     discoveryRadius: 5,
     routeDiscoveryRadius: 5,
+    dataSource: 'osm',
   };
   ctx.State.accEdits = {
     'acc-lisbon': { pricePerNight: 95 },

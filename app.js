@@ -250,7 +250,9 @@ const State = {
     dailyMealBudget: 22,
     discoveryRadius: 10,      // km — nearby POI discovery
     routeDiscoveryRadius: 5,  // km — along-route discovery
+    dataSource: 'osm',        // 'google' | 'osm'
   },
+  apiQuota: { today: 0, session: 0, dailyLimit: 100, date: '' },
   importedPois: [],       // POIs imported from Google Maps
   accEdits: {},           // accId → { name, notes, pricePerNight, lat, lng }
   dayAccAssignments: {},  // 'YYYY-MM-DD' → accId override
@@ -1076,8 +1078,17 @@ function initMap(lat, lng) {
       attribution: '© Esri, Maxar, Earthstar Geographics',
       maxZoom: 19,
     }),
+    googleRoadmap: L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      attribution: '© Google Maps',
+      maxZoom: 20,
+    }),
+    googleSatellite: L.tileLayer('https://mt1.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+      attribution: '© Google Maps',
+      maxZoom: 20,
+    }),
   };
   State.mapLayers.osm.addTo(State.map);
+  State._activeMapStyle = 'map'; // track current map style
 
   // Custom marker mode: click on map to drop a pin
   State.map.on('click', e => {
@@ -2238,13 +2249,17 @@ function setRouteMode(mode) {
 
 function setMapStyle(style) {
   if (!State.map || !State.mapLayers) return;
+  // Remove all base tile layers first
+  [State.mapLayers.osm, State.mapLayers.satellite, State.mapLayers.googleRoadmap, State.mapLayers.googleSatellite].forEach(layer => {
+    if (layer) State.map.removeLayer(layer);
+  });
+  const useGoogle = isGoogleMode();
   if (style === 'satellite') {
-    State.map.removeLayer(State.mapLayers.osm);
-    State.mapLayers.satellite.addTo(State.map);
+    (useGoogle ? State.mapLayers.googleSatellite : State.mapLayers.satellite).addTo(State.map);
   } else {
-    State.map.removeLayer(State.mapLayers.satellite);
-    State.mapLayers.osm.addTo(State.map);
+    (useGoogle ? State.mapLayers.googleRoadmap : State.mapLayers.osm).addTo(State.map);
   }
+  State._activeMapStyle = style;
   document.querySelectorAll('[data-style]').forEach(b => {
     b.classList.toggle('active', b.dataset.style === style);
   });
@@ -2254,6 +2269,7 @@ function setMapStyle(style) {
 async function searchGooglePlaces(query, lat, lng, radius) {
   if (!GMAPS_KEY) return null;
   try {
+    trackApiRequest();
     const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&location=${lat},${lng}&radius=${radius || 10000}&key=${GMAPS_KEY}`;
     const r = await fetch(url);
     return r.ok ? (await r.json()).results || [] : null;
@@ -2263,6 +2279,7 @@ async function searchGooglePlaces(query, lat, lng, radius) {
 async function nearbyGooglePlaces(lat, lng, radius, type) {
   if (!GMAPS_KEY) return null;
   try {
+    trackApiRequest();
     const typeParam = type && type !== 'all' ? `&type=${type}` : '';
     const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius || 10000}${typeParam}&key=${GMAPS_KEY}`;
     const r = await fetch(url);
@@ -2287,6 +2304,65 @@ function googlePlaceToDiscoverElement(place) {
     _ratingCount: place.user_ratings_total || 0,
     _photoRef: place.photos?.[0]?.photo_reference || '',
   };
+}
+
+// ─── Data Source Helpers ─────────────────────────────────────────
+function isGoogleMode() {
+  return State.settings.dataSource === 'google' && !!GMAPS_KEY;
+}
+
+function trackApiRequest() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (State.apiQuota.date !== today) {
+    State.apiQuota.today = 0;
+    State.apiQuota.date = today;
+  }
+  State.apiQuota.today++;
+  State.apiQuota.session++;
+  // Save to Firebase
+  DB.set('settings/apiQuota', { today: State.apiQuota.today, date: State.apiQuota.date });
+  // Auto-switch to OSM when limit reached
+  if (State.apiQuota.today >= State.apiQuota.dailyLimit) {
+    State.settings.dataSource = 'osm';
+    Storage.saveSettings();
+    showToast('Google API daily limit reached — switched to OpenStreetMap');
+    // Update settings toggle if visible
+    const toggle = document.getElementById('settings-data-source');
+    if (toggle) toggle.value = 'osm';
+    // Update quota display
+    updateQuotaDisplay();
+  }
+  updateQuotaDisplay();
+}
+
+function updateQuotaDisplay() {
+  const el = document.getElementById('settings-quota-display');
+  if (el) el.textContent = `${State.apiQuota.today} today / ${State.apiQuota.dailyLimit} limit (${State.apiQuota.session} this session)`;
+}
+
+function resetApiQuota() {
+  State.apiQuota.today = 0;
+  State.apiQuota.session = 0;
+  State.apiQuota.date = new Date().toISOString().slice(0, 10);
+  DB.set('settings/apiQuota', { today: 0, date: State.apiQuota.date });
+  updateQuotaDisplay();
+  showToast('API counter reset');
+}
+
+async function loadApiQuota() {
+  const saved = await DB.get('settings/apiQuota');
+  if (saved) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (saved.date === today) {
+      State.apiQuota.today = saved.today || 0;
+      State.apiQuota.date = saved.date;
+    } else {
+      State.apiQuota.today = 0;
+      State.apiQuota.date = today;
+    }
+  }
+  const savedLimit = await DB.get('settings/apiQuotaLimit');
+  if (savedLimit) State.apiQuota.dailyLimit = savedLimit;
 }
 
 // ─── Weather Overlays (OpenWeatherMap) ──────────────────────────
@@ -2469,6 +2545,11 @@ function openSettingsModal() {
   if (owmInput) owmInput.value = OWM_KEY;
   const gmapsInput = document.getElementById('settings-gmaps-key');
   if (gmapsInput) gmapsInput.value = GMAPS_KEY;
+  const dsInput = document.getElementById('settings-data-source');
+  if (dsInput) dsInput.value = State.settings.dataSource || 'osm';
+  const quotaLimitInput = document.getElementById('settings-quota-limit');
+  if (quotaLimitInput) quotaLimitInput.value = State.apiQuota.dailyLimit;
+  updateQuotaDisplay();
 
   updatePartyPreview();
   modal.classList.remove('hidden');
@@ -2520,10 +2601,27 @@ function saveSettings() {
     GMAPS_KEY = gmapsInput.value.trim();
     DB.set('settings/gmapsKey', GMAPS_KEY);
   }
+  const dsInput = document.getElementById('settings-data-source');
+  if (dsInput) {
+    const newDS = dsInput.value;
+    if (newDS === 'google' && !GMAPS_KEY) {
+      showToast('Set a Google Maps API key first');
+      dsInput.value = 'osm';
+    } else {
+      State.settings.dataSource = newDS;
+    }
+  }
+  const quotaLimitInput = document.getElementById('settings-quota-limit');
+  if (quotaLimitInput) {
+    State.apiQuota.dailyLimit = parseInt(quotaLimitInput.value, 10) || 100;
+    DB.set('settings/apiQuotaLimit', State.apiQuota.dailyLimit);
+  }
 
   Storage.saveParty();
   Storage.saveSettings();
   closeSettingsModal();
+  // Re-apply map tiles to match data source toggle
+  setMapStyle(State._activeMapStyle || 'map');
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   showToast('Settings saved');
 }
@@ -2836,21 +2934,37 @@ function accLocationSearch(inputEl) {
   resultsEl.innerHTML = '<div class="ae-search-loading">🔍 Searching…</div>';
   _aeSearchTimer = setTimeout(async () => {
     try {
-      // Search globally for lodging/accommodations — no bounded restriction
-      const params = new URLSearchParams({
-        format: 'json', limit: '6', q, addressdetails: '1',
-      });
-      const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`,
-        { headers: { 'Accept-Language': 'en' } });
-      const results = r.ok ? await r.json() : [];
+      let results = [];
+      if (isGoogleMode()) {
+        // Use Google Places Text Search for accommodations
+        const places = await searchGooglePlaces(q, 0, 0, 50000);
+        if (places?.length) {
+          results = places.slice(0, 6).map(p => ({
+            lat: p.geometry?.location?.lat,
+            lon: p.geometry?.location?.lng,
+            name: p.name,
+            display_name: p.formatted_address || p.name,
+            address: {},
+            _addr: p.formatted_address?.split(',').slice(1).join(',').trim() || '',
+          }));
+        }
+      } else {
+        // Search globally for lodging/accommodations — no bounded restriction
+        const params = new URLSearchParams({
+          format: 'json', limit: '6', q, addressdetails: '1',
+        });
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`,
+          { headers: { 'Accept-Language': 'en' } });
+        results = r.ok ? (await r.json()).map(r => ({ ...r, name: r.name || r.display_name.split(',')[0] })) : [];
+      }
       if (!results.length) { resultsEl.innerHTML = '<div class="ae-search-empty">No results</div>'; return; }
       resultsEl.innerHTML = results.map(r => {
-        const name = r.name || r.display_name.split(',')[0];
+        const name = r.name || r.display_name?.split(',')[0];
         // Extract city from addressdetails (more reliable than splitting display_name)
         const a = r.address || {};
         const city = a.city || a.town || a.village || a.municipality || a.county || '';
         const country = a.country || '';
-        const addr = [city, country].filter(Boolean).join(', ') || r.display_name.split(',').slice(1, 3).join(',').trim();
+        const addr = r._addr || [city, country].filter(Boolean).join(', ') || r.display_name?.split(',').slice(1, 3).join(',').trim() || '';
         return `<div class="ae-search-result" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${esc(name)}" data-addr="${esc(addr)}"
           onclick="App.selectAccLocation(+this.dataset.lat, +this.dataset.lon, this.dataset.name, this.dataset.addr)">
           <span class="ae-result-name">${esc(name)}</span>
@@ -3124,7 +3238,28 @@ function searchPois(inputEl, dayIndex) {
   if (q.length < 2) { resultsEl.innerHTML = ''; return; }
   resultsEl.innerHTML = '<div class="discover-loading">🔍 Searching…</div>';
   _searchTimer = setTimeout(async () => {
-    const results = await nominatimSearch(q, dayIndex);
+    let results;
+    if (isGoogleMode()) {
+      // Use Google Places Text Search
+      const day = getDay(dayIndex);
+      const acc = getEffectiveAcc(day?.date);
+      const { lat, lng } = acc ? getAccCoords(acc) : {};
+      const places = await searchGooglePlaces(q, lat || 0, lng || 0, 50000);
+      if (places?.length) {
+        results = places.map(p => ({
+          name: p.name,
+          display_name: p.formatted_address || p.name,
+          lat: String(p.geometry?.location?.lat),
+          lon: String(p.geometry?.location?.lng),
+          type: 'attraction',
+          class: 'tourism',
+          address: {},
+          extratags: { rating: p.rating, user_ratings_total: p.user_ratings_total },
+        }));
+      }
+    } else {
+      results = await nominatimSearch(q, dayIndex);
+    }
     if (!results?.length) {
       resultsEl.innerHTML = '<div class="discover-empty">No results found</div>';
       return;
@@ -3365,8 +3500,8 @@ async function discoverNearby(dayIndex, categoryFilter) {
 
   let elements = [];
 
-  // Try Google Places first (has real ratings), fall back to Overpass
-  if (GMAPS_KEY) {
+  // Use Google Places when Google mode is active, fall back to Overpass
+  if (isGoogleMode()) {
     const gmapsCat = { food: 'restaurant', bar: 'bar', museum: 'museum', park: 'park', entertainment: 'amusement_park' };
     const cat = categoryFilter || document.querySelector('.discover-cat-filter')?.value || 'all';
     const gType = gmapsCat[cat] || '';
@@ -3376,7 +3511,7 @@ async function discoverNearby(dayIndex, categoryFilter) {
     }
   }
 
-  // Fall back to Overpass if no Google results
+  // Fall back to Overpass if no Google results or OSM mode
   if (elements.length === 0) {
     const osm = await overpassQuery(aLat, aLng, radiusM);
     if (osm) elements = osm;
@@ -3391,7 +3526,7 @@ async function discoverNearby(dayIndex, categoryFilter) {
 
   // Category filter (for Overpass results; Google already filtered by type)
   const cat = categoryFilter || document.querySelector('.discover-cat-filter')?.value || 'all';
-  let filtered = !GMAPS_KEY && cat !== 'all' ? elements.filter(e => {
+  let filtered = !isGoogleMode() && cat !== 'all' ? elements.filter(e => {
     const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || '';
     return nominatimCategoryMap(type, type) === cat;
   }) : elements;
@@ -3411,10 +3546,10 @@ async function discoverAlongRoute(dayIndex) {
     el.innerHTML = '<div class="discover-loading">🔍 Searching along route…</div>';
   });
 
-  // Sample 7 evenly spaced points along the inter-city route for better coverage
+  // Sample points along the inter-city route: 3 for Google (fewer API calls), 7 for OSM
   const coords = State.lastInterCityResult?.geojson?.coordinates;
   let samplePoints = [];
-  const samplePcts = [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9];
+  const samplePcts = isGoogleMode() ? [0.25, 0.5, 0.75] : [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9];
   if (coords?.length >= 4) {
     samplePcts.forEach(pct => {
       const idx = Math.min(Math.floor(coords.length * pct), coords.length - 1);
@@ -3435,7 +3570,10 @@ async function discoverAlongRoute(dayIndex) {
   }
 
   const radiusM = (State.settings.routeDiscoveryRadius || 3) * 1000;
-  const queries = samplePoints.map(p => overpassQuery(p.lat, p.lng, radiusM));
+  // Use Google Places or Overpass depending on mode
+  const queries = isGoogleMode()
+    ? samplePoints.map(p => nearbyGooglePlaces(p.lat, p.lng, radiusM).then(places => places?.map(googlePlaceToDiscoverElement).filter(e => e.lat && e.lon) || []))
+    : samplePoints.map(p => overpassQuery(p.lat, p.lng, radiusM));
   const results = await Promise.allSettled(queries);
 
   // Merge + deduplicate by name
@@ -4254,6 +4392,11 @@ async function loadTrip(tripId) {
 
   const savedSettings = await Storage.loadSettings();
   if (savedSettings) Object.assign(State.settings, savedSettings);
+  // Ensure dataSource has a valid value
+  if (!State.settings.dataSource) State.settings.dataSource = 'osm';
+
+  // Load API quota
+  await loadApiQuota();
 
   // Load accommodation edits + user-created accommodations
   State.accEdits = await Storage.loadAccEdits(tripId);
@@ -4374,6 +4517,24 @@ function injectModals() {
           <div class="settings-field">
             <label class="settings-label">Along route (km)</label>
             <input type="number" id="settings-route-radius" class="settings-input" min="1" max="30" step="1" placeholder="3">
+          </div>
+        </div>
+        <div class="settings-divider">Data Source</div>
+        <div class="settings-field">
+          <label class="settings-label">Search &amp; map tiles source</label>
+          <select id="settings-data-source" class="settings-input">
+            <option value="osm">OpenStreetMap (free, no key needed)</option>
+            <option value="google">Google Maps (needs API key)</option>
+          </select>
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Google mode uses Google Places for search/discovery and Google map tiles</div>
+        </div>
+        <div class="settings-field" style="background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;">
+          <label class="settings-label">Google API requests</label>
+          <div id="settings-quota-display" style="font-size:13px;color:var(--color-text-secondary);margin:4px 0;">0 today / 100 limit</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+            <label class="settings-label" style="margin:0;white-space:nowrap;font-size:11px;">Daily limit:</label>
+            <input type="number" id="settings-quota-limit" class="settings-input" min="1" max="10000" step="10" value="100" style="width:80px;padding:3px 6px;">
+            <button class="modal-btn" style="font-size:11px;padding:3px 10px;background:rgba(255,255,255,0.08);border:1px solid var(--color-border);color:var(--color-text-secondary);" onclick="App.resetApiQuota()">Reset counter</button>
           </div>
         </div>
         <div class="settings-divider">API Keys</div>
@@ -4867,6 +5028,7 @@ window.App = {
   loadSharedPlan,
   dismissSharedPlan,
   importPlanFile,
+  resetApiQuota,
 };
 
 // ─── Initialization ────────────────────────────────────────────
