@@ -1258,47 +1258,39 @@ async function drawRoute(dayIndex) {
   const depCoords = depAcc ? getAccCoords(depAcc) : null;
   const arrCoords = arrAcc ? getAccCoords(arrAcc) : depCoords;
 
-  // If no POIs, draw inter-city route only (acc → acc)
-  if (poiWaypoints.length === 0) {
+  // Determine if this is an inter-city day
+  const isInterCity = depAcc && arrAcc && depAcc.id !== arrAcc.id;
+
+  // 1. Inter-city route (red, acc → acc) — always on travel days
+  if (isInterCity) {
     drawInterCityRoute(dayIndex);
-    updateRouteSummaryUI(null);
-    renderDayMetricsUI(dayIndex, 0);
-    return;
   }
 
-  // With POIs: single unified route (depart acc → POIs → arrive acc)
-  const waypoints = [];
-  if (depCoords?.lat && depCoords?.lng) waypoints.push([depCoords.lat, depCoords.lng]);
-  waypoints.push(...poiWaypoints);
-  if (arrCoords?.lat && arrCoords?.lng) waypoints.push([arrCoords.lat, arrCoords.lng]);
-  if (waypoints.length < 2) {
+  // 2. In-city route (blue, POI → POI only) — when there are POIs
+  if (poiWaypoints.length === 0) {
     updateRouteSummaryUI(null);
     renderDayMetricsUI(dayIndex, 0);
-    return;
-  }
-
-  const dayMode = getEffectiveRouteMode(day.date);
-  const result = await fetchRoute(waypoints, dayMode);
-  if (!result) {
-    updateRouteSummaryUI(null);
-    renderDayMetricsUI(dayIndex, 0);
-    return;
-  }
-  State.lastRouteResult = result;
-
-  // Walking = blue dashed, Driving = red solid
-  const routeStyle = dayMode === 'foot'
-    ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
-    : { color: '#e53935', weight: 4, opacity: 0.8, dashArray: null };
-  if (result.geojson) {
-    State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
   } else {
-    State.routePolyline = L.polyline(waypoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map);
+    const dayMode = getEffectiveRouteMode(day.date);
+    const result = await fetchRoute(poiWaypoints, dayMode);
+    if (result) {
+      State.lastRouteResult = result;
+      // In-city: walking=blue dashed, driving=blue solid
+      const routeStyle = dayMode === 'foot'
+        ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
+        : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
+      if (result.geojson) {
+        State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
+      } else {
+        State.routePolyline = L.polyline(poiWaypoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map);
+      }
+      updateRouteSummaryUI(result);
+      renderDayMetricsUI(dayIndex, result.distKm);
+    } else {
+      updateRouteSummaryUI(null);
+      renderDayMetricsUI(dayIndex, 0);
+    }
   }
-
-  updateRouteSummaryUI(result);
-  // Update metrics with actual walking/driving distance
-  renderDayMetricsUI(dayIndex, result.distKm);
   // Fit map to show the full route including accommodations
   fitMapToDay(dayIndex);
 }
