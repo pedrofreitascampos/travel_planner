@@ -1279,22 +1279,14 @@ async function drawRoute(dayIndex) {
   }
   State.lastRouteResult = result;
 
+  // Walking = green dashed, Driving = blue solid
+  const routeStyle = dayMode === 'foot'
+    ? { color: '#2e7d32', weight: 3, opacity: 0.8, dashArray: '8,4' }
+    : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
   if (result.geojson) {
-    State.routePolyline = L.geoJSON(result.geojson, {
-      style: {
-        color: '#1565c0',
-        weight: 4,
-        opacity: 0.8,
-        dashArray: dayMode === 'foot' ? '8,4' : null,
-      },
-    }).addTo(State.map);
+    State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
   } else {
-    State.routePolyline = L.polyline(waypoints, {
-      color: '#1565c0',
-      weight: 3,
-      opacity: 0.6,
-      dashArray: '6,6',
-    }).addTo(State.map);
+    State.routePolyline = L.polyline(waypoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map);
   }
 
   updateRouteSummaryUI(result);
