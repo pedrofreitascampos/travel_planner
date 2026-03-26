@@ -1247,19 +1247,26 @@ function clearAllRoutes() {
 async function drawRoute(dayIndex) {
   if (!State.map) return;
   clearAllRoutes();
-  // Draw inter-city route between accommodations
-  drawInterCityRoute(dayIndex);
 
   const day = getDay(dayIndex);
   if (!day) return;
   const plan = State.plan[day.date] || [];
   const poiWaypoints = plan.map(id => getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
-  // Route: depart acc → POIs → arrive acc
   const prevDate = State.trip.days[dayIndex - 1]?.date;
   const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
   const arrAcc = getEffectiveAcc(day.date);
   const depCoords = depAcc ? getAccCoords(depAcc) : null;
   const arrCoords = arrAcc ? getAccCoords(arrAcc) : depCoords;
+
+  // If no POIs, draw inter-city route only (acc → acc)
+  if (poiWaypoints.length === 0) {
+    drawInterCityRoute(dayIndex);
+    updateRouteSummaryUI(null);
+    renderDayMetricsUI(dayIndex, 0);
+    return;
+  }
+
+  // With POIs: single unified route (depart acc → POIs → arrive acc)
   const waypoints = [];
   if (depCoords?.lat && depCoords?.lng) waypoints.push([depCoords.lat, depCoords.lng]);
   waypoints.push(...poiWaypoints);
