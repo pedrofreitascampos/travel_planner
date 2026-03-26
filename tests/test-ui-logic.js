@@ -571,4 +571,50 @@ test('day metrics: party info line does not contain Settings link', () => {
   assert.ok(!metrics.costExplain.includes('Settings'), 'costExplain should not mention Settings');
 });
 
+// ─── Fix 1: Emoji picker grid constant exists ──────────────────
+
+test('EMOJI_GRID constant exists and has entries', () => {
+  const ctx = createTestContext();
+  assert.ok(Array.isArray(ctx.EMOJI_GRID), 'EMOJI_GRID should be an array');
+  assert.ok(ctx.EMOJI_GRID.length > 0, 'EMOJI_GRID should have entries');
+});
+
+test('buildEmojiPickerHtml produces emoji-picker-grid and emoji-pick-btn markup', () => {
+  const ctx = createTestContext();
+  const html = ctx.buildEmojiPickerHtml('test-input', 'test-grid');
+  assert.ok(html.includes('emoji-picker-grid'), 'Should contain emoji-picker-grid class');
+  assert.ok(html.includes('emoji-pick-btn'), 'Should contain emoji-pick-btn class');
+  assert.ok(html.includes('test-grid'), 'Should contain the extra class');
+});
+
+// ─── Fix 2: renderDayPlanContent does NOT auto-fire discoverNearby ──
+
+test('renderDayPlanContent does not call discoverNearby', () => {
+  const ctx = createTestContext();
+  // Read the function source and verify no discoverNearby call at the end
+  const fnSource = ctx.renderDayPlanContent.toString();
+  // The function should not contain a bare discoverNearby(dayIndex) call
+  // (it may appear in HTML templates as onclick handlers, which is fine)
+  // Split by the closing HTML template to check only the JS logic after innerHTML
+  const afterTemplate = fnSource.split('initTouchDrag')[1] || '';
+  assert.ok(!afterTemplate.includes('discoverNearby(dayIndex)'),
+    'renderDayPlanContent should not auto-call discoverNearby after rendering');
+  assert.ok(!afterTemplate.includes('discoverAlongRoute(dayIndex)'),
+    'renderDayPlanContent should not auto-call discoverAlongRoute after rendering');
+});
+
+// ─── Fix 3: loadSharedPlan awaits loadTrip ──────────────────────
+
+test('loadSharedPlan is async and awaits loadTrip', () => {
+  const ctx = createTestContext();
+  const fnSource = ctx.loadSharedPlan.toString();
+  // Verify it's async
+  assert.ok(fnSource.startsWith('async'), 'loadSharedPlan should be async');
+  // Verify it awaits loadTrip
+  assert.ok(fnSource.includes('await loadTrip'), 'loadSharedPlan should await loadTrip');
+  // Verify it does NOT use requestAnimationFrame
+  assert.ok(!fnSource.includes('requestAnimationFrame'),
+    'loadSharedPlan should not use requestAnimationFrame');
+});
+
 module.exports = tests;

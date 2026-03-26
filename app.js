@@ -1794,9 +1794,6 @@ function renderDayPlanContent(dayIndex) {
   // Load thumbnails async
   loadThumbsForDay(dayIndex);
 
-  // Auto-discover nearby POIs in background (for map markers + Discover tab)
-  discoverNearby(dayIndex);
-  if (hasInterCity) discoverAlongRoute(dayIndex);
 }
 
 function buildPoiCardHtml(poiId, idx) {
@@ -4544,40 +4541,38 @@ function checkShareParam() {
   } catch { /* malformed share param — ignore */ }
 }
 
-function loadSharedPlan() {
+async function loadSharedPlan() {
   const data = _pendingSharedPayload;
   if (!data) return;
   dismissSharedPlan();
   const trip = tripRegistry.find(t => t.id === data.tripId);
   if (!trip) { showToast('Trip not found — make sure you have the same trip loaded'); return; }
-  loadTrip(data.tripId);
-  // Apply after loadTrip initialises state
-  requestAnimationFrame(() => {
-    if (data.plan) State.plan = data.plan;
-    if (data.dayAccAssignments) State.dayAccAssignments = data.dayAccAssignments;
-    if (data.dayTransport) State.dayTransport = data.dayTransport;
-    if (data.dayRouteMode) State.dayRouteMode = data.dayRouteMode;
-    if (data.dayLabels) State.dayLabels = data.dayLabels;
-    if (data.dayEmojis) State.dayEmojis = data.dayEmojis;
-    Storage.save();
-    if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
-    // Restore user-created accommodations
-    if (data.userAccommodations?.length) {
-      data.userAccommodations.forEach(acc => {
-        if (!State.trip.accommodations.find(a => a.id === acc.id)) State.trip.accommodations.push(acc);
-      });
-      Storage.saveUserAccs(data.tripId);
-    }
-    if (data.importedPois?.length) {
-      State.importedPois = data.importedPois;
-      data.importedPois.forEach(poi => {
-        if (!State.trip.pois.find(p => p.id === poi.id)) State.trip.pois.push(poi);
-      });
-      Storage.saveImported(data.tripId);
-    }
-    renderAll();
-    showToast('Shared plan loaded ✅');
-  });
+  await loadTrip(data.tripId);
+  // Apply shared state synchronously after loadTrip has finished
+  if (data.plan) State.plan = data.plan;
+  if (data.dayAccAssignments) State.dayAccAssignments = data.dayAccAssignments;
+  if (data.dayTransport) State.dayTransport = data.dayTransport;
+  if (data.dayRouteMode) State.dayRouteMode = data.dayRouteMode;
+  if (data.dayLabels) State.dayLabels = data.dayLabels;
+  if (data.dayEmojis) State.dayEmojis = data.dayEmojis;
+  Storage.save();
+  if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
+  // Restore user-created accommodations
+  if (data.userAccommodations?.length) {
+    data.userAccommodations.forEach(acc => {
+      if (!State.trip.accommodations.find(a => a.id === acc.id)) State.trip.accommodations.push(acc);
+    });
+    Storage.saveUserAccs(data.tripId);
+  }
+  if (data.importedPois?.length) {
+    State.importedPois = data.importedPois;
+    data.importedPois.forEach(poi => {
+      if (!State.trip.pois.find(p => p.id === poi.id)) State.trip.pois.push(poi);
+    });
+    Storage.saveImported(data.tripId);
+  }
+  renderAll();
+  showToast('Shared plan loaded ✅');
 }
 
 function dismissSharedPlan() {
