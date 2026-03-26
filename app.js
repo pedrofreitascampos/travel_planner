@@ -1813,6 +1813,10 @@ function renderDayPlanContent(dayIndex) {
 
   // Load thumbnails async
   loadThumbsForDay(dayIndex);
+
+  // Auto-discover nearby POIs in background (for map markers + Discover tab)
+  discoverNearby(dayIndex);
+  if (hasInterCity) discoverAlongRoute(dayIndex);
 }
 
 function buildPoiCardHtml(poiId, idx) {
