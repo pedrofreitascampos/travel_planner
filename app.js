@@ -1286,10 +1286,10 @@ async function drawRoute(dayIndex) {
   }
   State.lastRouteResult = result;
 
-  // Walking = green dashed, Driving = blue solid
+  // Walking = blue dashed, Driving = red solid
   const routeStyle = dayMode === 'foot'
-    ? { color: '#2e7d32', weight: 3, opacity: 0.8, dashArray: '8,4' }
-    : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
+    ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
+    : { color: '#e53935', weight: 4, opacity: 0.8, dashArray: null };
   if (result.geojson) {
     State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
   } else {
