@@ -1764,6 +1764,13 @@ function renderDayPlanContent(dayIndex) {
             <option value="entertainment">🎢 Entertainment</option>
             <option value="nature">🌿 Nature</option>
           </select>
+          <select class="discover-rating-filter" onchange="App.discoverNearby(${dayIndex})" title="Minimum rating">
+            <option value="0">Any rating</option>
+            <option value="3">★ 3+</option>
+            <option value="3.5">★ 3.5+</option>
+            <option value="4">★ 4+</option>
+            <option value="4.5">★ 4.5+</option>
+          </select>
           <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">↻</button>
         </div>
         <div class="nearby-discover-results">
@@ -2243,8 +2250,48 @@ function setMapStyle(style) {
   });
 }
 
+// ─── Google Places API ──────────────────────────────────────────
+async function searchGooglePlaces(query, lat, lng, radius) {
+  if (!GMAPS_KEY) return null;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&location=${lat},${lng}&radius=${radius || 10000}&key=${GMAPS_KEY}`;
+    const r = await fetch(url);
+    return r.ok ? (await r.json()).results || [] : null;
+  } catch { return null; }
+}
+
+async function nearbyGooglePlaces(lat, lng, radius, type) {
+  if (!GMAPS_KEY) return null;
+  try {
+    const typeParam = type && type !== 'all' ? `&type=${type}` : '';
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius || 10000}${typeParam}&key=${GMAPS_KEY}`;
+    const r = await fetch(url);
+    return r.ok ? (await r.json()).results || [] : null;
+  } catch { return null; }
+}
+
+function googlePlaceToDiscoverElement(place) {
+  return {
+    lat: place.geometry?.location?.lat,
+    lon: place.geometry?.location?.lng,
+    tags: {
+      name: place.name,
+      rating: place.rating,
+      user_ratings_total: place.user_ratings_total,
+      opening_hours: place.opening_hours?.open_now ? 'Open now' : '',
+      cuisine: place.types?.includes('restaurant') ? (place.types.find(t => !['restaurant','food','point_of_interest','establishment'].includes(t))?.replace(/_/g,' ') || '') : '',
+    },
+    _gmaps: true,
+    _placeId: place.place_id,
+    _rating: place.rating || 0,
+    _ratingCount: place.user_ratings_total || 0,
+    _photoRef: place.photos?.[0]?.photo_reference || '',
+  };
+}
+
 // ─── Weather Overlays (OpenWeatherMap) ──────────────────────────
 let OWM_KEY = ''; // Loaded from Firebase settings on init
+let GMAPS_KEY = ''; // Loaded from Firebase settings on init
 const _weatherOverlays = {};
 
 function toggleWeatherOverlay(type, show) {
@@ -2420,6 +2467,8 @@ function openSettingsModal() {
   if (routeRadInput) routeRadInput.value = State.settings.routeDiscoveryRadius;
   const owmInput = document.getElementById('settings-owm-key');
   if (owmInput) owmInput.value = OWM_KEY;
+  const gmapsInput = document.getElementById('settings-gmaps-key');
+  if (gmapsInput) gmapsInput.value = GMAPS_KEY;
 
   updatePartyPreview();
   modal.classList.remove('hidden');
@@ -2465,6 +2514,11 @@ function saveSettings() {
   if (owmInput?.value.trim()) {
     OWM_KEY = owmInput.value.trim();
     DB.set('settings/owmKey', OWM_KEY);
+  }
+  const gmapsInput = document.getElementById('settings-gmaps-key');
+  if (gmapsInput?.value.trim()) {
+    GMAPS_KEY = gmapsInput.value.trim();
+    DB.set('settings/gmapsKey', GMAPS_KEY);
   }
 
   Storage.saveParty();
@@ -3126,9 +3180,12 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
   // Mini meta from OSM tags
   const t = osmTags || {};
 
-  // Star rating: prefer Michelin stars, fall back to hotel/venue stars tag
+  // Star rating: Google rating > Michelin > OSM stars
   let starHtml = '';
-  if (t['michelin:stars']) {
+  if (t.rating && t.user_ratings_total) {
+    const r = parseFloat(t.rating);
+    starHtml = `<span class="disc-stars" title="${r}/5 (${t.user_ratings_total} reviews)">★ ${r.toFixed(1)} <span class="disc-stars-label">(${t.user_ratings_total})</span></span>`;
+  } else if (t['michelin:stars']) {
     const n = Math.min(+t['michelin:stars'], 3);
     starHtml = `<span class="disc-stars" title="Michelin ${n}★">${'★'.repeat(n)}<span class="disc-stars-label"> Michelin</span></span>`;
   } else if (t.stars) {
@@ -3300,21 +3357,50 @@ async function discoverNearby(dayIndex, categoryFilter) {
   document.querySelectorAll('.nearby-discover-results').forEach(el => {
     el.innerHTML = '<div class="discover-loading">🔍 Searching…</div>';
   });
-  const radiusM = (State.settings.discoveryRadius || 5) * 1000;
+  const radiusM = (State.settings.discoveryRadius || 10) * 1000;
   const { lat: aLat, lng: aLng } = getAccCoords(acc);
-  const elements = await overpassQuery(aLat, aLng, radiusM);
-  if (!elements) {
+
+  // Rating filter
+  const minRating = parseFloat(document.querySelector('.discover-rating-filter')?.value) || 0;
+
+  let elements = [];
+
+  // Try Google Places first (has real ratings), fall back to Overpass
+  if (GMAPS_KEY) {
+    const gmapsCat = { food: 'restaurant', bar: 'bar', museum: 'museum', park: 'park', entertainment: 'amusement_park' };
+    const cat = categoryFilter || document.querySelector('.discover-cat-filter')?.value || 'all';
+    const gType = gmapsCat[cat] || '';
+    const places = await nearbyGooglePlaces(aLat, aLng, radiusM, gType);
+    if (places?.length) {
+      elements = places.map(googlePlaceToDiscoverElement).filter(e => e.lat && e.lon);
+    }
+  }
+
+  // Fall back to Overpass if no Google results
+  if (elements.length === 0) {
+    const osm = await overpassQuery(aLat, aLng, radiusM);
+    if (osm) elements = osm;
+  }
+
+  if (!elements.length) {
     document.querySelectorAll('.nearby-discover-results').forEach(el => {
-      el.innerHTML = '<div class="discover-empty">Discovery service unavailable. Try again.</div>';
+      el.innerHTML = '<div class="discover-empty">No places found. Try a larger radius.</div>';
     });
     return;
   }
-  // Filter by category if specified
+
+  // Category filter (for Overpass results; Google already filtered by type)
   const cat = categoryFilter || document.querySelector('.discover-cat-filter')?.value || 'all';
-  const filtered = cat === 'all' ? elements : elements.filter(e => {
+  let filtered = !GMAPS_KEY && cat !== 'all' ? elements.filter(e => {
     const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || '';
     return nominatimCategoryMap(type, type) === cat;
-  });
+  }) : elements;
+
+  // Rating filter
+  if (minRating > 0) {
+    filtered = filtered.filter(e => (e._rating || parseFloat(e.tags?.stars) || 0) >= minRating);
+  }
+
   renderDiscoverResults(filtered, '.nearby-discover-results', aLat, aLng, dayIndex);
 }
 
@@ -4163,6 +4249,8 @@ async function loadTrip(tripId) {
   if (savedParty && Array.isArray(savedParty)) State.partyConfig = savedParty;
   const savedOwmKey = await DB.get('settings/owmKey');
   if (savedOwmKey) OWM_KEY = savedOwmKey;
+  const savedGmapsKey = await DB.get('settings/gmapsKey');
+  if (savedGmapsKey) GMAPS_KEY = savedGmapsKey;
 
   const savedSettings = await Storage.loadSettings();
   if (savedSettings) Object.assign(State.settings, savedSettings);
@@ -4292,6 +4380,10 @@ function injectModals() {
         <div class="settings-field">
           <label class="settings-label">OpenWeatherMap key (for rain/cloud overlays)</label>
           <input type="text" id="settings-owm-key" class="settings-input" placeholder="Get free key at openweathermap.org">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Google Maps Places key (for ratings &amp; photos)</label>
+          <input type="text" id="settings-gmaps-key" class="settings-input" placeholder="Enable Places API in Google Cloud Console">
         </div>
       </div>
       <div class="modal-actions">
