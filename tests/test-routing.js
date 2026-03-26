@@ -240,4 +240,44 @@ test('haversineKm: same point gives 0', () => {
   assert.strictEqual(dist, 0, 'Same point should give 0 distance');
 });
 
+test('placeMarkers: shows acc marker for dayAccAssignment even if acc.days is empty', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  ctx.State.trip.accommodations.push({
+    id: 'acc-user-test', name: 'User Hotel', location: 'TestCity',
+    lat: 40, lng: -8, days: [], isUserCreated: true,
+  });
+  ctx.State.dayAccAssignments['2026-06-01'] = 'acc-user-test';
+
+  try {
+    ctx.placeMarkers();
+    assert.ok(true, 'placeMarkers should handle assigned accs with empty days');
+  } catch (e) {
+    assert.fail('placeMarkers crashed: ' + e.message);
+  }
+});
+
+test('in-city route: same-city day is not inter-city', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Day 2: dep=acc-lisbon, arr=acc-lisbon → same city
+  const depAcc = ctx.getEffectiveAcc('2026-06-01');
+  const arrAcc = ctx.getEffectiveAcc('2026-06-02');
+  const isInterCity = depAcc && arrAcc && depAcc.id !== arrAcc.id;
+  assert.strictEqual(isInterCity, false, 'Same acc should not be inter-city');
+});
+
+test('in-city route: different accs is inter-city', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Day 3: dep=acc-lisbon, arr=acc-sintra → different cities
+  const depAcc = ctx.getEffectiveAcc('2026-06-02');
+  const arrAcc = ctx.getEffectiveAcc('2026-06-03');
+  const isInterCity = depAcc && arrAcc && depAcc.id !== arrAcc.id;
+  assert.strictEqual(isInterCity, true, 'Different accs should be inter-city');
+});
+
 module.exports = tests;

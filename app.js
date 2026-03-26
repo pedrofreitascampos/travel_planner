@@ -1185,12 +1185,15 @@ function placeMarkers() {
     });
   }
 
-  // Accommodation markers
+  // Accommodation markers — show for dates in acc.days OR dayAccAssignments
   const shownDateArr = [...shownDates];
+  const assignedAccIds = new Set(shownDateArr.map(d => State.dayAccAssignments[d]).filter(Boolean));
   const addedAccIds = new Set();
   State.trip.accommodations.forEach(acc => {
     if (addedAccIds.has(acc.id)) return;
-    if (!(acc.days || []).some(d => shownDateArr.includes(d))) return;
+    const inDays = (acc.days || []).some(d => shownDateArr.includes(d));
+    const inAssignments = assignedAccIds.has(acc.id);
+    if (!inDays && !inAssignments) return;
     addedAccIds.add(acc.id);
     const { lat: aLat, lng: aLng } = getAccCoords(acc);
     const m = L.marker([aLat, aLng], { icon: makeAccIcon() })
@@ -1266,13 +1269,18 @@ async function drawRoute(dayIndex) {
     drawInterCityRoute(dayIndex);
   }
 
-  // 2. In-city route (blue, POI → POI only) — when there are POIs
+  // 2. In-city route — on same-city days include acc as start/end
   if (poiWaypoints.length === 0) {
     updateRouteSummaryUI(null);
     renderDayMetricsUI(dayIndex, 0);
   } else {
     const dayMode = getEffectiveRouteMode(day.date);
-    const result = await fetchRoute(poiWaypoints, dayMode);
+    // Same-city: acc → POIs → acc (full circuit). Inter-city: POIs only (inter-city handles acc-to-acc)
+    const inCityWaypoints = [];
+    if (!isInterCity && arrCoords?.lat && arrCoords?.lng) inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+    inCityWaypoints.push(...poiWaypoints);
+    if (!isInterCity && arrCoords?.lat && arrCoords?.lng) inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+    const result = await fetchRoute(inCityWaypoints.length >= 2 ? inCityWaypoints : poiWaypoints, dayMode);
     if (result) {
       State.lastRouteResult = result;
       // In-city: walking=blue dashed, driving=blue solid
