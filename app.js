@@ -1176,9 +1176,26 @@ function placeMarkers() {
     if (!inDays && !inAssignments) return;
     addedAccIds.add(acc.id);
     const { lat: aLat, lng: aLng } = getAccCoords(acc);
+    const edit = State.accEdits[acc.id] || {};
+    const displayName = edit.name || acc.name;
+    const notes = edit.notes !== undefined ? edit.notes : (acc.notes || '');
+    const price = edit.pricePerNight ? `€${edit.pricePerNight}/night` : '';
+    const contact = edit.contact || '';
+    const website = edit.website || '';
+    const reservation = edit.reservation || '';
+    const details = [notes, price].filter(Boolean).join(' · ');
+    const links = [
+      website ? `<a href="${esc(website)}" target="_blank" rel="noopener" style="color:var(--color-accent);font-size:10px;">🌐 Website</a>` : '',
+      contact ? `<span style="font-size:10px;">📞 ${esc(contact)}</span>` : '',
+      reservation ? `<span style="font-size:10px;">🔖 ${esc(reservation)}</span>` : '',
+    ].filter(Boolean).join(' · ');
     const m = L.marker([aLat, aLng], { icon: makeAccIcon() })
       .addTo(State.map)
-      .bindPopup(`<div style="padding:8px 10px;"><b>🏨 ${esc(acc.name)}</b><br><span style="font-size:11px;color:#666;">${esc(acc.notes || '')}</span></div>`, { maxWidth: 200 });
+      .bindPopup(`<div style="padding:10px 12px;min-width:160px;">
+        <b>🏨 ${esc(displayName)}</b>
+        ${details ? `<br><span style="font-size:11px;color:#666;">${esc(details)}</span>` : ''}
+        ${links ? `<br><div style="margin-top:4px;">${links}</div>` : ''}
+      </div>`, { maxWidth: 250 });
     State.accMarkers.push(m);
   });
 }
@@ -2690,6 +2707,9 @@ function openAccEditModal(accId, isNew) {
   document.getElementById('ae-name').value = edit.name ?? acc.name;
   document.getElementById('ae-notes').value = edit.notes !== undefined ? edit.notes : (acc.notes || '');
   document.getElementById('ae-price').value = edit.pricePerNight ?? '';
+  document.getElementById('ae-website').value = edit.website || '';
+  document.getElementById('ae-contact').value = edit.contact || '';
+  document.getElementById('ae-reservation').value = edit.reservation || '';
   document.getElementById('ae-search').value = '';
   document.getElementById('ae-search-results').innerHTML = '';
   const badge = document.getElementById('ae-location-badge');
@@ -2823,6 +2843,9 @@ function saveAccEdit() {
     name: document.getElementById('ae-name').value.trim(),
     notes: document.getElementById('ae-notes').value.trim(),
     pricePerNight: parseFloat(document.getElementById('ae-price').value) || 0,
+    website: document.getElementById('ae-website').value.trim(),
+    contact: document.getElementById('ae-contact').value.trim(),
+    reservation: document.getElementById('ae-reservation').value.trim(),
     ...(coordsChanged ? { lat, lng } : {}),
     ...(State._aePendingLabel?.[accId] ? { locationLabel: State._aePendingLabel[accId] } : {}),
   };
@@ -4377,13 +4400,28 @@ function injectModals() {
           <input type="number" id="ae-price" class="settings-input" min="0" step="1" placeholder="0">
           <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Added to each night's total cost</div>
         </div>
+        <div class="settings-divider">Booking Details</div>
+        <div class="settings-field">
+          <label class="settings-label">Website / booking link</label>
+          <input type="url" id="ae-website" class="settings-input" placeholder="https://...">
+        </div>
+        <div class="settings-row-2">
+          <div class="settings-field">
+            <label class="settings-label">Contact / phone</label>
+            <input type="text" id="ae-contact" class="settings-input" placeholder="e.g. +351 ...">
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Reservation #</label>
+            <input type="text" id="ae-reservation" class="settings-input" placeholder="e.g. BK-123456">
+          </div>
+        </div>
+        <div class="settings-divider">Location</div>
         <div class="settings-field">
           <label class="settings-label">Coordinates (lat, lng)</label>
           <div style="display:flex;gap:8px;">
             <input type="number" id="ae-lat" class="settings-input" step="0.0001" placeholder="lat" style="flex:1">
             <input type="number" id="ae-lng" class="settings-input" step="0.0001" placeholder="lng" style="flex:1">
           </div>
-          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">Updates map pin and all distance calculations</div>
         </div>
       </div>
       <div class="modal-actions">
