@@ -1255,11 +1255,16 @@ async function drawRoute(dayIndex) {
     renderDayMetricsUI(dayIndex, 0);
   } else {
     const dayMode = getEffectiveRouteMode(day.date);
-    // Same-city: acc → POIs → acc (full circuit). Inter-city: POIs only (inter-city handles acc-to-acc)
+    // Walking: route between POIs only (you walk between sights, not from/to hotel)
+    // Driving: include acc as start/end (you drive from hotel to sights and back)
     const inCityWaypoints = [];
-    if (!isInterCity && arrCoords?.lat && arrCoords?.lng) inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+    if (dayMode === 'driving' && !isInterCity && arrCoords?.lat && arrCoords?.lng) {
+      inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+    }
     inCityWaypoints.push(...poiWaypoints);
-    if (!isInterCity && arrCoords?.lat && arrCoords?.lng) inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+    if (dayMode === 'driving' && !isInterCity && arrCoords?.lat && arrCoords?.lng) {
+      inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+    }
     const result = await fetchRoute(inCityWaypoints.length >= 2 ? inCityWaypoints : poiWaypoints, dayMode);
     if (result) {
       State.lastRouteResult = result;
