@@ -1733,6 +1733,11 @@ function renderDayPlanContent(dayIndex) {
         ${poiCardsHtml}
       </div>
       ${arriveCardHtml}
+      <div class="discover-search-wrap" style="margin-top:8px;">
+        <input class="poi-search-input" type="text" placeholder="🔍 Add a place…"
+          oninput="App.searchPois(this, ${dayIndex})">
+      </div>
+      <div class="search-results-host"></div>
     </div>
 
     <!-- TAB: Discover -->
@@ -1745,7 +1750,7 @@ function renderDayPlanContent(dayIndex) {
 
       <div class="discover-group">
         <div class="discover-group-label">
-          💡 Suggestions ·
+          📍 Near accommodation ·
           <select class="discover-cat-filter" onchange="App.discoverNearby(${dayIndex}, this.value)">
             <option value="all">All types</option>
             <option value="food">🍽️ Restaurants</option>
@@ -1757,10 +1762,10 @@ function renderDayPlanContent(dayIndex) {
             <option value="entertainment">🎢 Entertainment</option>
             <option value="nature">🌿 Nature</option>
           </select>
-          <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">Load</button>
+          <button class="discover-load-btn" onclick="App.discoverNearby(${dayIndex})">↻</button>
         </div>
         <div class="nearby-discover-results">
-          ${addMoreHtml || '<div class="discover-empty">Click Load to discover places nearby</div>'}
+          <div class="discover-loading">🔍 Finding interesting places…</div>
         </div>
       </div>
 
@@ -1771,9 +1776,11 @@ function renderDayPlanContent(dayIndex) {
           <input type="number" class="discover-radius-input" min="1" max="50" step="1"
             value="${State.settings.routeDiscoveryRadius}"
             onchange="App.setRouteDiscoveryRadius(this.value)" title="Search radius in km"> km
-          <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">Load</button>
+          <button class="discover-load-btn" onclick="App.discoverAlongRoute(${dayIndex})">↻</button>
         </div>
-        <div class="route-discover-results"></div>
+        <div class="route-discover-results">
+          <div class="discover-loading">🔍 Searching along route…</div>
+        </div>
       </div>` : ''}
     </div>
 
@@ -2586,6 +2593,20 @@ function getEffectiveRouteMode(date) {
 function switchDayTab(tabName) {
   document.querySelectorAll('.day-subtab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
   document.querySelectorAll('.day-tab-panel').forEach(p => p.style.display = p.dataset.panel === tabName ? '' : 'none');
+  // Auto-load discover content when switching to Discover tab
+  if (tabName === 'discover') {
+    const di = State.selectedDayIndex;
+    // Load nearby if not already loaded
+    const nearbyEl = document.querySelector('.nearby-discover-results');
+    if (nearbyEl?.querySelector('.discover-loading')) {
+      discoverNearby(di);
+    }
+    // Load along-route if not already loaded
+    const routeEl = document.querySelector('.route-discover-results');
+    if (routeEl?.querySelector('.discover-loading')) {
+      discoverAlongRoute(di);
+    }
+  }
 }
 
 function saveDayEmoji(date, text) {
