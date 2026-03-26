@@ -1712,7 +1712,7 @@ function renderDayPlanContent(dayIndex) {
 
     <!-- TAB: Plan -->
     <div class="day-tab-panel" data-panel="plan">
-      <div class="route-summary" style="display:none"></div>
+      <div class="route-summary"><span style="font-size:11px;color:var(--color-text-light);">Calculating route…</span></div>
       ${departCardHtml}
       <div class="poi-list" data-day="${dayIndex}">
         ${poiCardsHtml}
@@ -3934,7 +3934,7 @@ function openNewTripForm() {
     <div class="modal-panel new-trip-panel">
       <div class="modal-header">
         <span class="modal-title">＋ New Trip</span>
-        <button class="modal-close" onclick="App.closeNewTripForm()">×</button>
+        <button class="modal-close-btn" onclick="App.closeNewTripForm()">✕</button>
       </div>
 
       <div class="new-trip-form" id="ntf">
@@ -3983,19 +3983,26 @@ function ntfAddLeg() {
   const container = document.getElementById('ntf-legs');
   if (!container) return;
   const idx = container.children.length;
+  // Auto-populate check-in from previous leg's check-out
+  let defaultCheckin = '';
+  if (idx > 0) {
+    const prevRow = container.children[idx - 1];
+    const prevCheckout = prevRow?.querySelector('.ntf-leg-checkout')?.value;
+    if (prevCheckout) defaultCheckin = prevCheckout;
+  }
   const row = document.createElement('div');
   row.className = 'ntf-leg-row';
   row.innerHTML = `
     <div class="ntf-leg-fields">
       <div class="ntf-leg-main">
-        <input class="ntf-leg-acc" type="text" placeholder="Accommodation name" autocomplete="off">
+        <input class="ntf-leg-acc" type="text" placeholder="Accommodation name (optional)" autocomplete="off">
         <input class="ntf-leg-city" type="text" placeholder="City / location" autocomplete="off">
       </div>
       <div class="ntf-leg-dates">
         <label>Check-in</label>
-        <input class="ntf-leg-checkin" type="date" title="Check-in">
+        <input class="ntf-leg-checkin" type="date" value="${defaultCheckin}">
         <label>Check-out</label>
-        <input class="ntf-leg-checkout" type="date" title="Check-out">
+        <input class="ntf-leg-checkout" type="date">
       </div>
     </div>
     ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-leg-row').remove()" title="Remove">×</button>` : ''}`;
@@ -4039,8 +4046,8 @@ async function ntfSubmit() {
   window._tripRegistry.push(trip);
 
   closeNewTripForm();
-  loadTrip(trip.id);
-  showToast(`"${trip.name}" created! Add places via the 📥 Import button.`);
+  await loadTrip(trip.id);
+  showToast(`"${trip.name}" created!`);
 }
 
 function showTripSelector(trips) {

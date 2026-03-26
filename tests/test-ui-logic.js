@@ -605,6 +605,36 @@ test('renderDayPlanContent does not call discoverNearby', () => {
 
 // ─── Fix 3: loadSharedPlan awaits loadTrip ──────────────────────
 
+test('ntfSubmit awaits loadTrip', () => {
+  const ctx = createTestContext();
+  const fnSource = ctx.ntfSubmit.toString();
+  assert.ok(fnSource.includes('await loadTrip'), 'ntfSubmit should await loadTrip');
+});
+
+test('createUserTrip: legs produce correct days and accommodations', () => {
+  const ctx = createTestContext();
+  const trip = ctx.createUserTrip({
+    name: 'Test Trip',
+    home: 'Lisbon',
+    legs: [
+      { city: 'Porto', accName: 'Hotel Porto', dateFrom: '2026-07-01', dateTo: '2026-07-03', emoji: '🏙️', country: 'Portugal' },
+      { city: 'Braga', accName: 'Hotel Braga', dateFrom: '2026-07-03', dateTo: '2026-07-05', emoji: '⛪', country: 'Portugal' },
+    ],
+  });
+  // Should have: 3 days Porto + 3 days Braga + 1 return = 7 days
+  assert.ok(trip.days.length >= 6, `Should have at least 6 days, got ${trip.days.length}`);
+  // First day should be driving from Lisbon
+  assert.ok(trip.days[0].driving, 'First day should have driving');
+  assert.strictEqual(trip.days[0].driving.from, 'Lisbon');
+  // Last day should be return to Lisbon
+  const lastDay = trip.days[trip.days.length - 1];
+  assert.ok(lastDay.driving, 'Last day should have driving');
+  assert.strictEqual(lastDay.driving.to, 'Lisbon');
+  // Should have home + 2 accommodations
+  assert.ok(trip.accommodations.length >= 3, 'Should have home + 2 accs');
+  assert.ok(trip.accommodations[0].isHome, 'First acc should be home');
+});
+
 test('loadSharedPlan is async and awaits loadTrip', () => {
   const ctx = createTestContext();
   const fnSource = ctx.loadSharedPlan.toString();
