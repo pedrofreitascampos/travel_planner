@@ -236,7 +236,8 @@ const State = {
   routePolyline: null,
   interCityPolyline: null,
   lastInterCityResult: null,
-  discoveryMarkers: [],     // temporary markers for discovered places
+  nearbyMarkers: [],        // markers for nearby discovered places
+  routeMarkers: [],         // markers for along-route discovered places
   markers: {},            // poiId → L.Marker
   accMarkers: [],
   map: null,
@@ -1145,7 +1146,6 @@ function placeMarkers() {
   State.trip.pois.forEach(poi => {
     // Source filter
     if (poi.source === 'user' && !State.layers.showUser) return;
-    if (poi.source === 'suggested' && !State.layers.showSuggested) return;
     if (poi.source === 'imported' && !State.layers.showUser) return;
     // Category filter
     if (!State.layers.categories[poi.category]) return;
@@ -1164,26 +1164,6 @@ function placeMarkers() {
     State.markers[poi.id] = marker;
   });
 
-  // Available-to-add POIs as semi-transparent markers (tied to Suggested toggle)
-  if (State.layers.showSuggested && currentDay) {
-    const available = getPoisAvailableToAdd(State.selectedDayIndex);
-    available.forEach(poi => {
-      if (State.markers[poi.id]) return; // already placed
-      if (!State.layers.categories[poi.category]) return;
-      const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
-      const icon = L.divIcon({
-        html: `<div style="width:34px;height:34px;border-radius:50%;background:${cat.color};border:2.5px dashed rgba(255,255,255,0.8);box-shadow:0 2px 6px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.55;">${cat.icon}</div>`,
-        className: '',
-        iconSize: [34, 34],
-        iconAnchor: [17, 17],
-        popupAnchor: [0, -12],
-      });
-      const m = L.marker([poi.lat, poi.lng], { icon })
-        .addTo(State.map)
-        .bindPopup(buildPopupHTML(poi), { maxWidth: 230, minWidth: 175 });
-      State.markers[poi.id] = m;
-    });
-  }
 
   // Accommodation markers — show for dates in acc.days OR dayAccAssignments
   const shownDateArr = [...shownDates];
@@ -2212,13 +2192,6 @@ function toggleLayer(key, val) {
   Storage.save();
   placeMarkers();
   if (key === 'showAllDays') fitMapToDay(State.selectedDayIndex);
-  if (key === 'showSuggested') {
-    // Show/hide discovery markers
-    State.discoveryMarkers.forEach(m => {
-      if (val) m.addTo(State.map);
-      else State.map?.removeLayer(m);
-    });
-  }
 }
 
 function toggleCategory(key, val) {
@@ -3222,8 +3195,18 @@ async function overpassQuery(lat, lng, radiusM) {
 }
 
 function clearDiscoveryMarkers() {
-  State.discoveryMarkers.forEach(m => State.map?.removeLayer(m));
-  State.discoveryMarkers = [];
+  State.nearbyMarkers.forEach(m => State.map?.removeLayer(m));
+  State.nearbyMarkers = [];
+  State.routeMarkers.forEach(m => State.map?.removeLayer(m));
+  State.routeMarkers = [];
+}
+
+function toggleDiscoverLayer(type, show) {
+  const markers = type === 'nearby' ? State.nearbyMarkers : State.routeMarkers;
+  markers.forEach(m => {
+    if (show) m.addTo(State.map);
+    else State.map?.removeLayer(m);
+  });
 }
 
 function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, dayIndex) {
@@ -3244,24 +3227,30 @@ function renderDiscoverResults(elements, containerSel, anchorLat, anchorLng, day
     })
     .slice(0, 30);
 
-  // Place markers on map for discovered results
-  clearDiscoveryMarkers();
-  if (State.map && State.layers.showSuggested) {
+  // Place markers on map — store in nearby or route array
+  const isRoute = containerSel.includes('route');
+  const targetArr = isRoute ? 'routeMarkers' : 'nearbyMarkers';
+  // Clear previous markers of this type
+  State[targetArr].forEach(m => State.map?.removeLayer(m));
+  State[targetArr] = [];
+  const toggleId = isRoute ? 'toggle-along-route' : 'toggle-nearby';
+  const isVisible = document.getElementById(toggleId)?.checked ?? true;
+  if (State.map && isVisible) {
     fresh.forEach(e => {
       const lat = e.lat ?? e.center?.lat;
       const lon = e.lon ?? e.center?.lon;
       const type = e.tags?.tourism || e.tags?.amenity || e.tags?.leisure || e.tags?.historic || e.tags?.natural || '';
       const cat = CATEGORIES[nominatimCategoryMap(type, type)] || CATEGORIES.monument;
       const icon = L.divIcon({
-        html: `<div style="width:24px;height:24px;border-radius:50%;background:${cat.color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;opacity:0.8;">${cat.icon}</div>`,
+        html: `<div style="width:34px;height:34px;border-radius:50%;background:${cat.color};border:2.5px dashed rgba(255,255,255,0.8);box-shadow:0 2px 6px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.55;">${cat.icon}</div>`,
         className: '',
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
       });
       const m = L.marker([lat, lon], { icon })
         .addTo(State.map)
         .bindPopup(`<div style="padding:6px;font-size:12px;"><b>${esc(e.tags.name)}</b><br><span style="color:#666;">${esc(type)}</span></div>`, { maxWidth: 180 });
-      State.discoveryMarkers.push(m);
+      State[targetArr].push(m);
     });
   }
 
@@ -4683,6 +4672,7 @@ window.App = {
   toggleCategory,
   setRouteMode,
   setMapStyle,
+  toggleDiscoverLayer,
   toggleWeatherOverlay,
   loadTrip,
   openSettingsModal,
