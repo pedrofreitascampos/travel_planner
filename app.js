@@ -68,10 +68,27 @@ const Auth = {
   async signIn() {
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      await firebaseAuth.signInWithPopup(provider);
+      await firebaseAuth.signInWithRedirect(provider);
       // onAuthStateChanged will handle the rest
     } catch (e) {
-      if (e.code !== 'auth/popup-closed-by-user') console.error('Sign-in failed:', e);
+      if (e.code === 'auth/popup-closed-by-user') return;
+      console.error('Sign-in failed:', e.code, e.message);
+      const msgs = {
+        'auth/unauthorized-domain': `This domain is not authorized for sign-in.\nAdd it to Firebase Console → Authentication → Authorized domains.`,
+        'auth/operation-not-allowed': 'Google sign-in is not enabled.\nEnable it in Firebase Console → Authentication → Sign-in method.',
+        'auth/popup-blocked': 'Pop-up was blocked by the browser.\nAllow pop-ups for this site and try again.',
+        'auth/internal-error': `Sign-in failed: ${e.message}`,
+      };
+      const msg = msgs[e.code] || `Sign-in failed (${e.code || 'unknown'}):\n${e.message}`;
+      // Show error below sign-in button
+      let errEl = document.getElementById('auth-error-msg');
+      if (!errEl) {
+        errEl = document.createElement('div');
+        errEl.id = 'auth-error-msg';
+        errEl.style.cssText = 'color:#f87171;font-size:13px;margin-top:12px;text-align:center;white-space:pre-line;max-width:340px;';
+        document.getElementById('g-signin-btn')?.after(errEl);
+      }
+      errEl.textContent = msg;
     }
   },
 
