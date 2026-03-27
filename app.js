@@ -252,7 +252,7 @@ const State = {
     routeDiscoveryRadius: 5,  // km — along-route discovery
     dataSource: 'osm',        // 'google' | 'osm'
   },
-  apiQuota: { today: 0, session: 0, dailyLimit: 100, date: '' },
+  apiQuota: { today: 0, month: 0, session: 0, monthlyLimit: 500, date: '', yearMonth: '' },
   importedPois: [],       // POIs imported from Google Maps
   accEdits: {},           // accId → { name, notes, pricePerNight, lat, lng }
   dayAccAssignments: {},  // 'YYYY-MM-DD' → accId override
@@ -2313,38 +2313,42 @@ function isGoogleMode() {
 
 function trackApiRequest() {
   const today = new Date().toISOString().slice(0, 10);
+  const yearMonth = today.slice(0, 7); // YYYY-MM
   if (State.apiQuota.date !== today) {
     State.apiQuota.today = 0;
     State.apiQuota.date = today;
   }
+  if (State.apiQuota.yearMonth !== yearMonth) {
+    State.apiQuota.month = 0;
+    State.apiQuota.yearMonth = yearMonth;
+  }
   State.apiQuota.today++;
+  State.apiQuota.month++;
   State.apiQuota.session++;
-  // Save to Firebase
-  DB.set('settings/apiQuota', { today: State.apiQuota.today, date: State.apiQuota.date });
-  // Auto-switch to OSM when limit reached
-  if (State.apiQuota.today >= State.apiQuota.dailyLimit) {
-    State.settings.dataSource = 'osm';
-    Storage.saveSettings();
-    showToast('Google API daily limit reached — switched to OpenStreetMap');
-    // Update settings toggle if visible
-    const toggle = document.getElementById('settings-data-source');
-    if (toggle) toggle.value = 'osm';
-    // Update quota display
-    updateQuotaDisplay();
+  DB.set('settings/apiQuota', {
+    today: State.apiQuota.today, date: State.apiQuota.date,
+    month: State.apiQuota.month, yearMonth: State.apiQuota.yearMonth,
+  });
+  // Warn once when monthly limit reached
+  if (State.apiQuota.month === State.apiQuota.monthlyLimit) {
+    showToast(`⚠️ Google API monthly limit reached (${State.apiQuota.monthlyLimit} requests). Consider switching to OSM in Settings.`);
   }
   updateQuotaDisplay();
 }
 
 function updateQuotaDisplay() {
   const el = document.getElementById('settings-quota-display');
-  if (el) el.textContent = `${State.apiQuota.today} today / ${State.apiQuota.dailyLimit} limit (${State.apiQuota.session} this session)`;
+  if (el) el.textContent = `${State.apiQuota.today} today · ${State.apiQuota.month} this month / ${State.apiQuota.monthlyLimit} limit`;
 }
 
 function resetApiQuota() {
   State.apiQuota.today = 0;
+  State.apiQuota.today = 0;
+  State.apiQuota.month = 0;
   State.apiQuota.session = 0;
   State.apiQuota.date = new Date().toISOString().slice(0, 10);
-  DB.set('settings/apiQuota', { today: 0, date: State.apiQuota.date });
+  State.apiQuota.yearMonth = State.apiQuota.date.slice(0, 7);
+  DB.set('settings/apiQuota', { today: 0, month: 0, date: State.apiQuota.date, yearMonth: State.apiQuota.yearMonth });
   updateQuotaDisplay();
   showToast('API counter reset');
 }
@@ -2353,16 +2357,14 @@ async function loadApiQuota() {
   const saved = await DB.get('settings/apiQuota');
   if (saved) {
     const today = new Date().toISOString().slice(0, 10);
-    if (saved.date === today) {
-      State.apiQuota.today = saved.today || 0;
-      State.apiQuota.date = saved.date;
-    } else {
-      State.apiQuota.today = 0;
-      State.apiQuota.date = today;
-    }
+    const yearMonth = today.slice(0, 7);
+    State.apiQuota.date = today;
+    State.apiQuota.yearMonth = yearMonth;
+    State.apiQuota.today = saved.date === today ? (saved.today || 0) : 0;
+    State.apiQuota.month = saved.yearMonth === yearMonth ? (saved.month || 0) : 0;
   }
   const savedLimit = await DB.get('settings/apiQuotaLimit');
-  if (savedLimit) State.apiQuota.dailyLimit = savedLimit;
+  if (savedLimit) State.apiQuota.monthlyLimit = savedLimit;
 }
 
 // ─── Weather Overlays (OpenWeatherMap) ──────────────────────────
@@ -2548,7 +2550,7 @@ function openSettingsModal() {
   const dsInput = document.getElementById('settings-data-source');
   if (dsInput) dsInput.value = State.settings.dataSource || 'osm';
   const quotaLimitInput = document.getElementById('settings-quota-limit');
-  if (quotaLimitInput) quotaLimitInput.value = State.apiQuota.dailyLimit;
+  if (quotaLimitInput) quotaLimitInput.value = State.apiQuota.monthlyLimit;
   updateQuotaDisplay();
 
   updatePartyPreview();
@@ -2613,8 +2615,8 @@ function saveSettings() {
   }
   const quotaLimitInput = document.getElementById('settings-quota-limit');
   if (quotaLimitInput) {
-    State.apiQuota.dailyLimit = parseInt(quotaLimitInput.value, 10) || 100;
-    DB.set('settings/apiQuotaLimit', State.apiQuota.dailyLimit);
+    State.apiQuota.monthlyLimit = parseInt(quotaLimitInput.value, 10) || 500;
+    DB.set('settings/apiQuotaLimit', State.apiQuota.monthlyLimit);
   }
 
   Storage.saveParty();
@@ -4530,10 +4532,10 @@ function injectModals() {
         </div>
         <div class="settings-field" style="background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;">
           <label class="settings-label">Google API requests</label>
-          <div id="settings-quota-display" style="font-size:13px;color:var(--color-text-secondary);margin:4px 0;">0 today / 100 limit</div>
+          <div id="settings-quota-display" style="font-size:13px;color:var(--color-text-secondary);margin:4px 0;">0 today · 0 this month / 500 limit</div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-            <label class="settings-label" style="margin:0;white-space:nowrap;font-size:11px;">Daily limit:</label>
-            <input type="number" id="settings-quota-limit" class="settings-input" min="1" max="10000" step="10" value="100" style="width:80px;padding:3px 6px;">
+            <label class="settings-label" style="margin:0;white-space:nowrap;font-size:11px;">Monthly limit:</label>
+            <input type="number" id="settings-quota-limit" class="settings-input" min="1" max="10000" step="50" value="500" style="width:80px;padding:3px 6px;">
             <button class="modal-btn" style="font-size:11px;padding:3px 10px;background:rgba(255,255,255,0.08);border:1px solid var(--color-border);color:var(--color-text-secondary);" onclick="App.resetApiQuota()">Reset counter</button>
           </div>
         </div>
