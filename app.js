@@ -68,7 +68,7 @@ const Auth = {
   async signIn() {
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      await firebaseAuth.signInWithRedirect(provider);
+      await firebaseAuth.signInWithPopup(provider);
       // onAuthStateChanged will handle the rest
     } catch (e) {
       if (e.code === 'auth/popup-closed-by-user') return;
