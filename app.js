@@ -5,17 +5,10 @@
 
 'use strict';
 
-// ─── Firebase Configuration ──────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyAvWjExtINNkJJNfTP920kf84MgT4rvjOc",
-  authDomain: "tripcraft-e0389.firebaseapp.com",
-  databaseURL: "https://tripcraft-e0389-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "tripcraft-e0389",
-  storageBucket: "tripcraft-e0389.firebasestorage.app",
-  messagingSenderId: "874209627182",
-  appId: "1:874209627182:web:881944909632eeb82163bf",
-};
-const ALLOWED_EMAILS = ['pedrofreitascampos@gmail.com', 'faye.anson@gmail.com'];
+// ─── Configuration (loaded from config.js) ──────────────────
+const _cfg = window.__APP_CONFIG || {};
+const firebaseConfig = _cfg.firebase || {};
+const ALLOWED_EMAILS = _cfg.allowedEmails || [];
 
 // Initialize Firebase
 const firebaseApp = firebase.initializeApp(firebaseConfig);
@@ -1289,44 +1282,50 @@ async function drawRoute(dayIndex) {
   // Determine if this is an inter-city day
   const isInterCity = depAcc && arrAcc && depAcc.id !== arrAcc.id;
 
-  // 1. Inter-city route (red, acc → acc) — always on travel days
+  // 1. Inter-city route — include detour POIs as waypoints
   if (isInterCity) {
-    drawInterCityRoute(dayIndex);
+    drawInterCityRoute(dayIndex, poiWaypoints);
+    if (poiWaypoints.length === 0) {
+      updateRouteSummaryUI(null);
+      renderDayMetricsUI(dayIndex, 0);
+    }
   }
 
   // 2. In-city route — on same-city days include acc as start/end
-  if (poiWaypoints.length === 0) {
-    updateRouteSummaryUI(null);
-    renderDayMetricsUI(dayIndex, 0);
-  } else {
-    const dayMode = getEffectiveRouteMode(day.date);
-    // Walking: route between POIs only (you walk between sights, not from/to hotel)
-    // Driving: include acc as start/end (you drive from hotel to sights and back)
-    const inCityWaypoints = [];
-    if (dayMode === 'driving' && !isInterCity && arrCoords?.lat && arrCoords?.lng) {
-      inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
-    }
-    inCityWaypoints.push(...poiWaypoints);
-    if (dayMode === 'driving' && !isInterCity && arrCoords?.lat && arrCoords?.lng) {
-      inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
-    }
-    const result = await fetchRoute(inCityWaypoints.length >= 2 ? inCityWaypoints : poiWaypoints, dayMode);
-    if (result) {
-      State.lastRouteResult = result;
-      // In-city: walking=blue dashed, driving=blue solid
-      const routeStyle = dayMode === 'foot'
-        ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
-        : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
-      if (result.geojson) {
-        State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
-      } else {
-        State.routePolyline = L.polyline(poiWaypoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map);
-      }
-      updateRouteSummaryUI(result);
-      renderDayMetricsUI(dayIndex, result.distKm);
-    } else {
+  if (!isInterCity) {
+    if (poiWaypoints.length === 0) {
       updateRouteSummaryUI(null);
       renderDayMetricsUI(dayIndex, 0);
+    } else {
+      const dayMode = getEffectiveRouteMode(day.date);
+      // Walking: route between POIs only (you walk between sights, not from/to hotel)
+      // Driving: include acc as start/end (you drive from hotel to sights and back)
+      const inCityWaypoints = [];
+      if (dayMode === 'driving' && arrCoords?.lat && arrCoords?.lng) {
+        inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+      }
+      inCityWaypoints.push(...poiWaypoints);
+      if (dayMode === 'driving' && arrCoords?.lat && arrCoords?.lng) {
+        inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+      }
+      const result = await fetchRoute(inCityWaypoints.length >= 2 ? inCityWaypoints : poiWaypoints, dayMode);
+      if (result) {
+        State.lastRouteResult = result;
+        // In-city: walking=blue dashed, driving=blue solid
+        const routeStyle = dayMode === 'foot'
+          ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
+          : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
+        if (result.geojson) {
+          State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
+        } else {
+          State.routePolyline = L.polyline(poiWaypoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map);
+        }
+        updateRouteSummaryUI(result);
+        renderDayMetricsUI(dayIndex, result.distKm);
+      } else {
+        updateRouteSummaryUI(null);
+        renderDayMetricsUI(dayIndex, 0);
+      }
     }
   }
   // Fit map to show the full route including accommodations
@@ -1394,7 +1393,7 @@ async function findNearestAirport(lat, lng) {
 
 let _interCityGen = 0; // prevents stale async responses from adding layers
 
-async function drawInterCityRoute(dayIndex) {
+async function drawInterCityRoute(dayIndex, poiWaypoints = []) {
   const gen = ++_interCityGen;
 
   const day = getDay(dayIndex);
@@ -1439,7 +1438,8 @@ async function drawInterCityRoute(dayIndex) {
       color: '#e53935', weight: 3, opacity: 0.7, dashArray: '6,8',
     }).addTo(State.map));
 
-    const leg3 = await fetchRoute([[arrAP.lat, arrAP.lng], [arrC.lat, arrC.lng]], 'driving');
+    const leg3Waypoints = [[arrAP.lat, arrAP.lng], ...poiWaypoints, [arrC.lat, arrC.lng]];
+    const leg3 = await fetchRoute(leg3Waypoints, 'driving');
     if (gen !== _interCityGen) return;
     if (leg3?.geojson) {
       layers.push(L.geoJSON(leg3.geojson, {
@@ -1463,7 +1463,7 @@ async function drawInterCityRoute(dayIndex) {
     return;
   }
 
-  // Ground transport
+  // Ground transport — include detour POIs as waypoints
   const routeStyles = {
     driving: { color: '#e53935', weight: 4, opacity: 0.6, dashArray: '10,6' },
     train:   { color: '#6a1b9a', weight: 4, opacity: 0.7, dashArray: '4,8' },
@@ -1471,7 +1471,8 @@ async function drawInterCityRoute(dayIndex) {
   };
   const style = routeStyles[tType] || routeStyles.driving;
 
-  const result = await fetchRoute([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], 'driving');
+  const groundWaypoints = [[depC.lat, depC.lng], ...poiWaypoints, [arrC.lat, arrC.lng]];
+  const result = await fetchRoute(groundWaypoints, 'driving');
   if (gen !== _interCityGen) return; // stale
   if (!result) return;
   State.lastInterCityResult = result;
@@ -1479,13 +1480,16 @@ async function drawInterCityRoute(dayIndex) {
   if (result.geojson) {
     State.interCityPolyline = L.geoJSON(result.geojson, { style }).addTo(State.map);
   } else {
-    State.interCityPolyline = L.polyline([[depC.lat, depC.lng], [arrC.lat, arrC.lng]], style).addTo(State.map);
+    State.interCityPolyline = L.polyline(groundWaypoints, style).addTo(State.map);
   }
 
   // Update the drive-info detail with actual OSRM distance/duration
   document.querySelectorAll('.drive-info-detail').forEach(el => {
     el.textContent = `${formatDuration(result.durMin)} · ${Math.round(result.distKm)} km`;
   });
+
+  updateRouteSummaryUI(result);
+  renderDayMetricsUI(dayIndex, result.distKm);
 }
 
 // ─── Effective Day Label ────────────────────────────────────────

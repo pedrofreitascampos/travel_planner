@@ -280,4 +280,56 @@ test('in-city route: different accs is inter-city', () => {
   assert.strictEqual(isInterCity, true, 'Different accs should be inter-city');
 });
 
+// ─── Inter-city route includes detour POIs ──────────────────
+
+test('inter-city route: POI waypoints included between dep and arr acc', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Day 3 (index 2): dep=acc-lisbon, arr=acc-sintra, plan has poi-3
+  const dayIndex = 2;
+  const day = ctx.getDay(dayIndex);
+  const plan = ctx.State.plan[day.date] || [];
+  const poiWaypoints = plan.map(id => ctx.getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
+
+  const prevDate = ctx.State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? ctx.getEffectiveAcc(prevDate) : ctx.getHomeAcc();
+  const arrAcc = ctx.getEffectiveAcc(day.date);
+  const depC = ctx.getAccCoords(depAcc);
+  const arrC = ctx.getAccCoords(arrAcc);
+
+  // Simulate the ground waypoints built by drawInterCityRoute
+  const groundWaypoints = [[depC.lat, depC.lng], ...poiWaypoints, [arrC.lat, arrC.lng]];
+
+  assert.strictEqual(groundWaypoints.length, 3, 'Should have dep + 1 POI + arr = 3 waypoints');
+  assert.deepStrictEqual(groundWaypoints[0], [38.72, -9.14], 'First should be dep acc (Lisbon)');
+  assert.deepStrictEqual(groundWaypoints[1], [38.79, -9.39], 'Middle should be POI (Pena Palace)');
+  assert.deepStrictEqual(groundWaypoints[2], [38.80, -9.39], 'Last should be arr acc (Sintra)');
+});
+
+test('inter-city route: no POIs still routes dep → arr directly', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Clear day 3 plan
+  ctx.State.plan['2026-06-03'] = [];
+
+  const dayIndex = 2;
+  const day = ctx.getDay(dayIndex);
+  const plan = ctx.State.plan[day.date] || [];
+  const poiWaypoints = plan.map(id => ctx.getPoi(id)).filter(Boolean).map(p => [p.lat, p.lng]);
+
+  const prevDate = ctx.State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? ctx.getEffectiveAcc(prevDate) : ctx.getHomeAcc();
+  const arrAcc = ctx.getEffectiveAcc(day.date);
+  const depC = ctx.getAccCoords(depAcc);
+  const arrC = ctx.getAccCoords(arrAcc);
+
+  const groundWaypoints = [[depC.lat, depC.lng], ...poiWaypoints, [arrC.lat, arrC.lng]];
+
+  assert.strictEqual(groundWaypoints.length, 2, 'Should have just dep + arr = 2 waypoints');
+  assert.deepStrictEqual(groundWaypoints[0], [38.72, -9.14], 'First should be dep acc');
+  assert.deepStrictEqual(groundWaypoints[1], [38.80, -9.39], 'Last should be arr acc');
+});
+
 module.exports = tests;

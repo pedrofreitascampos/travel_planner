@@ -204,6 +204,10 @@ function createTestContext() {
   const sandbox = {
     // Browser globals
     window: {},
+    __APP_CONFIG: {
+      firebase: { apiKey: 'test', authDomain: 'test', databaseURL: 'test', projectId: 'test' },
+      allowedEmails: ['pedrofreitascampos@gmail.com'],
+    },
     document: mockDocument,
     firebase: mockFirebase,
     L: mockL,
