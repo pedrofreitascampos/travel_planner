@@ -307,6 +307,14 @@ function createTestContext() {
     window.updateQuotaDisplay = updateQuotaDisplay;
     window.setMapStyle = setMapStyle;
     window.Log = Log;
+    window.renderRadarChartSVG = renderRadarChartSVG;
+    window.renderMetricBar = renderMetricBar;
+    window.renderDayMetricsUI = renderDayMetricsUI;
+    window.calcDayMetrics = calcDayMetrics;
+    window.calcTripMetrics = calcTripMetrics;
+    window.generateDayNarrative = generateDayNarrative;
+    window.renderComparisonRadarSVG = renderComparisonRadarSVG;
+    window.renderPackingWeatherSummary = renderPackingWeatherSummary;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });

@@ -574,7 +574,7 @@ async function fetchWeather(lat, lng, date) {
   const url = [
     'https://api.open-meteo.com/v1/forecast',
     `?latitude=${lat}&longitude=${lng}`,
-    `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode`,
+    `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode,sunrise,sunset`,
     `&timezone=auto&start_date=${date}&end_date=${date}`,
   ].join('');
   const t0 = Date.now();
@@ -591,6 +591,8 @@ async function fetchWeather(lat, lng, date) {
       tempMin: Math.round(d.daily.temperature_2m_min[0]),
       precip: d.daily.precipitation_probability_max[0],
       code: d.daily.weathercode[0],
+      sunrise: d.daily.sunrise?.[0] || null,
+      sunset: d.daily.sunset?.[0] || null,
     };
     State.weatherCache[key] = w;
     return w;
@@ -1054,6 +1056,107 @@ function renderRadarChartSVG(metrics, accentColor) {
   </svg>`;
 }
 
+// ─── Day Comparison Radar (overlaid) ────────────────────────────
+function renderComparisonRadarSVG(tripMetrics) {
+  if (!tripMetrics?.allMetrics) return '';
+  const axes = ['cultural', 'gastronomic', 'relaxation', 'fun', 'kidsFun', 'familyFriendly'];
+  const axisLabels = ['Cultural', 'Gastronomy', 'Relaxation', 'Fun', 'Kids Fun', 'Family Fit'];
+  const n = axes.length;
+  const cx = 120, cy = 125, r = 85;
+
+  function polarToXY(angleDeg, radius) {
+    const rad = (angleDeg - 90) * Math.PI / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  }
+
+  // Grid
+  let grid = '';
+  [0.25, 0.5, 0.75, 1.0].forEach(scale => {
+    const pts = axes.map((_, i) => { const p = polarToXY((360/n)*i, r*scale); return `${p.x},${p.y}`; }).join(' ');
+    grid += `<polygon points="${pts}" fill="none" stroke="#e0e0e0" stroke-width="${scale===1?1.5:0.8}"/>`;
+  });
+  axes.forEach((_, i) => {
+    const p = polarToXY((360/n)*i, r);
+    grid += `<line x1="${cx}" y1="${cy}" x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}" stroke="#e0e0e0" stroke-width="0.8"/>`;
+  });
+
+  // Labels
+  let labels = '';
+  axisLabels.forEach((lbl, i) => {
+    const p = polarToXY((360/n)*i, r+16);
+    const anchor = p.x < cx-5 ? 'end' : p.x > cx+5 ? 'start' : 'middle';
+    labels += `<text x="${p.x.toFixed(1)}" y="${(p.y+3).toFixed(1)}" text-anchor="${anchor}" font-size="9" fill="#666" font-family="system-ui,sans-serif">${lbl}</text>`;
+  });
+
+  // One polygon per day
+  let polygons = '';
+  let legend = '';
+  tripMetrics.allMetrics.forEach((m, i) => {
+    if (!m) return;
+    const color = getDayColor(i);
+    const pts = axes.map((k, j) => {
+      const val = Math.max(0, Math.min(10, m[k]));
+      const p = polarToXY((360/n)*j, r*(val/10));
+      return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    }).join(' ');
+    polygons += `<polygon points="${pts}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`;
+    const day = getDay(i);
+    const lbl = day ? getEffectiveDayLabel(day) : `Day ${i+1}`;
+    legend += `<span class="comparison-legend-item"><span class="comparison-legend-dot" style="background:${color}"></span>${esc(lbl)}</span>`;
+  });
+
+  return `<svg viewBox="0 0 240 250" width="240" height="250" xmlns="http://www.w3.org/2000/svg">
+    ${grid}${polygons}${labels}
+  </svg>
+  <div class="comparison-legend">${legend}</div>`;
+}
+
+// ─── Packing Weather Summary ────────────────────────────────────
+function renderPackingWeatherSummary() {
+  if (!State.trip) return '';
+  const days = State.trip.days;
+  let minTemp = Infinity, maxTemp = -Infinity;
+  let rainDays = 0, hotDays = 0, coldDays = 0;
+  let hasCachedWeather = false;
+
+  days.forEach(day => {
+    // Find cached weather for this day
+    const loc = getWeatherLocation(days.indexOf(day));
+    if (!loc) return;
+    const key = `${loc.lat.toFixed(2)},${loc.lng.toFixed(2)},${day.date}`;
+    const w = State.weatherCache[key];
+    if (!w) return;
+    hasCachedWeather = true;
+    if (w.tempMin < minTemp) minTemp = w.tempMin;
+    if (w.tempMax > maxTemp) maxTemp = w.tempMax;
+    if (w.precip > 50) rainDays++;
+    if (w.tempMax > 30) hotDays++;
+    if (w.tempMin < 10) coldDays++;
+  });
+
+  if (!hasCachedWeather) return '';
+
+  const suggestions = [];
+  if (minTemp < 15) suggestions.push('🧥 Pack a jacket (lows to ' + minTemp + '°C)');
+  if (maxTemp > 28) suggestions.push('🧴 Bring sunscreen (highs to ' + maxTemp + '°C)');
+  if (rainDays > 0) suggestions.push('☂️ ' + rainDays + ' day' + (rainDays > 1 ? 's' : '') + ' with rain likely — pack an umbrella');
+  if (hotDays > 0) suggestions.push('🕶️ Sunglasses recommended');
+  if (coldDays > 0) suggestions.push('🧣 Layer up — some chilly mornings expected');
+  if (minTemp >= 15 && maxTemp <= 28 && rainDays === 0) suggestions.push('✨ Perfect weather — pack light!');
+
+  return `<div class="metric-section">
+    <div class="metric-section-title">🎒 Packing Guide</div>
+    <div class="packing-summary">
+      <div class="packing-temp-range">
+        <span class="packing-temp-cold">❄️ ${minTemp === Infinity ? '?' : minTemp}°C</span>
+        <div class="packing-temp-bar"><div class="packing-temp-fill" style="left:${Math.max(0,(minTemp+10)/60*100)}%;right:${Math.max(0,100-(maxTemp+10)/60*100)}%;"></div></div>
+        <span class="packing-temp-hot">🔥 ${maxTemp === -Infinity ? '?' : maxTemp}°C</span>
+      </div>
+      <div class="packing-items">${suggestions.map(s => `<div class="packing-item">${s}</div>`).join('')}</div>
+    </div>
+  </div>`;
+}
+
 // Tooltip descriptions for each metric bar label
 const METRIC_TOOLTIPS = {
   'Family Fit':   'How suitable this day is for your party — influenced by kids-friendly ratings, museum density, and drive time',
@@ -1083,6 +1186,78 @@ function renderMetricBar(icon, label, value, inverted) {
     </div>
     <span class="metric-bar-score">${displayVal.toFixed(1)}</span>
   </div>`;
+}
+
+// ─── Day Narrative Generator ────────────────────────────────────
+function generateDayNarrative(dayIndex, poiIds, hasInterCity, depCity, arrCity) {
+  if (!poiIds || poiIds.length === 0) {
+    return `<div class="day-narrative"><em>No activities planned yet — add some places to build your day!</em></div>`;
+  }
+  const pois = poiIds.map(id => getPoi(id)).filter(Boolean);
+  const categories = new Map();
+  pois.forEach(p => {
+    const cat = CATEGORIES[p.category]?.label || p.category;
+    categories.set(cat, (categories.get(cat) || 0) + 1);
+  });
+
+  const totalHours = pois.reduce((s, p) => s + (p.duration || 1), 0);
+  const foodPois = pois.filter(p => p.category === 'food' || p.category === 'bar');
+  const highlights = pois.filter(p => p.rating >= 4.5).map(p => p.name);
+
+  let narrative = '';
+
+  // Opening — travel or local
+  if (hasInterCity && depCity && arrCity) {
+    narrative += `Today you journey from ${depCity} to ${arrCity}. `;
+  } else if (depCity) {
+    narrative += `A day exploring ${depCity}. `;
+  }
+
+  // Activity summary
+  if (pois.length === 1) {
+    narrative += `The focus is on ${pois[0].name} — `;
+    narrative += `about ${totalHours}h of ${(CATEGORIES[pois[0].category]?.label || 'activities').toLowerCase()}. `;
+  } else {
+    const catList = [...categories.entries()].map(([k, v]) => v > 1 ? `${v} ${k.toLowerCase()} stops` : k.toLowerCase()).join(', ');
+    narrative += `You have ${pois.length} stops planned across ${catList} — roughly ${totalHours}h of activities. `;
+  }
+
+  // Food
+  if (foodPois.length > 0) {
+    narrative += foodPois.length === 1
+      ? `Don't miss ${foodPois[0].name} for a meal. `
+      : `Dining highlights: ${foodPois.map(p => p.name).join(' & ')}. `;
+  }
+
+  // Highlights
+  if (highlights.length > 0 && highlights.length <= 3) {
+    narrative += `Top-rated: ${highlights.join(', ')}. `;
+  }
+
+  return `<div class="day-narrative">${esc(narrative.trim())}</div>`;
+}
+
+// ─── Confetti Burst ─────────────────────────────────────────────
+let _confettiShownFor = new Set();
+function showConfetti(container) {
+  if (!container) return;
+  const colors = ['#e53935', '#f9a825', '#2e7d32', '#1565c0', '#6a1b9a', '#e07b54'];
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < 30; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-particle';
+    p.style.cssText = `
+      left:${50 + (Math.random() - 0.5) * 60}%;
+      background:${colors[i % colors.length]};
+      --dx:${(Math.random() - 0.5) * 200}px;
+      --dy:${-60 - Math.random() * 120}px;
+      animation-delay:${Math.random() * 200}ms;
+    `;
+    frag.appendChild(p);
+  }
+  container.style.position = 'relative';
+  container.appendChild(frag);
+  setTimeout(() => container.querySelectorAll('.confetti-particle').forEach(p => p.remove()), 1200);
 }
 
 // ─── Day Metrics UI ────────────────────────────────────────────
@@ -1153,6 +1328,12 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
 
   document.querySelectorAll('.day-metrics-widget').forEach(el => {
     el.innerHTML = html;
+    // Confetti burst for great days (only once per day per session)
+    const dayKey = `${State.trip?.id}-${dayIndex}`;
+    if (metrics.overall >= 8 && !_confettiShownFor.has(dayKey)) {
+      _confettiShownFor.add(dayKey);
+      showConfetti(el);
+    }
   });
   // Keep trip overview in sync
   updateTripOverviewContent();
@@ -1332,7 +1513,63 @@ function fitMapToDay(dayIndex) {
   }
 }
 
+// ─── Route Replay Animation ─────────────────────────────────────
+let _replayMarker = null;
+let _replayTimer = null;
+
+function startRouteReplay() {
+  stopRouteReplay();
+  if (!State.map) return;
+
+  // Collect route coordinates from the current polyline
+  let coords = [];
+  if (State.routePolyline && State.routePolyline.toGeoJSON) {
+    const geo = State.routePolyline.toGeoJSON();
+    if (geo.type === 'FeatureCollection') {
+      geo.features.forEach(f => {
+        if (f.geometry?.coordinates) coords.push(...f.geometry.coordinates.map(c => [c[1], c[0]]));
+      });
+    } else if (geo.geometry?.coordinates) {
+      coords = geo.geometry.coordinates.map(c => [c[1], c[0]]);
+    }
+  }
+  if (coords.length < 2) {
+    showToast('No route to replay');
+    return;
+  }
+
+  // Sample every N points for smooth but fast animation
+  const step = Math.max(1, Math.floor(coords.length / 120));
+  const sampled = coords.filter((_, i) => i % step === 0);
+  if (sampled[sampled.length - 1] !== coords[coords.length - 1]) sampled.push(coords[coords.length - 1]);
+
+  const icon = L.divIcon({
+    className: 'replay-marker',
+    html: '<div class="replay-marker-dot"></div>',
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+
+  _replayMarker = L.marker(sampled[0], { icon, zIndexOffset: 1000 }).addTo(State.map);
+  let idx = 0;
+
+  _replayTimer = setInterval(() => {
+    idx++;
+    if (idx >= sampled.length) {
+      stopRouteReplay();
+      return;
+    }
+    _replayMarker.setLatLng(sampled[idx]);
+  }, 50);
+}
+
+function stopRouteReplay() {
+  if (_replayTimer) { clearInterval(_replayTimer); _replayTimer = null; }
+  if (_replayMarker && State.map) { State.map.removeLayer(_replayMarker); _replayMarker = null; }
+}
+
 function clearAllRoutes() {
+  stopRouteReplay();
   if (!State.map) return;
   // Clear in-city route
   if (State.routePolyline) {
@@ -1631,6 +1868,18 @@ async function loadAndRenderWeatherAll(dayIndex) {
   }
 
   const wmo = WMO_CODES[w.code] ?? WMO_CODES[0];
+  const goldenHourHtml = (() => {
+    if (!w.sunrise || !w.sunset) return '';
+    const fmt = iso => { const d = new Date(iso); return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0'); };
+    const sunsetTime = new Date(w.sunset);
+    const goldenStart = new Date(sunsetTime.getTime() - 60 * 60 * 1000); // 1h before sunset
+    return `<div class="golden-hour-row">
+      <span class="golden-hour-item" title="Sunrise">🌅 ${fmt(w.sunrise)}</span>
+      <span class="golden-hour-item golden" title="Golden hour starts">📸 ${fmt(goldenStart)}</span>
+      <span class="golden-hour-item" title="Sunset">🌇 ${fmt(w.sunset)}</span>
+    </div>`;
+  })();
+
   const widgetHtml = `
     <div class="weather-widget">
       <div class="weather-icon-large">${wmo.icon}</div>
@@ -1640,7 +1889,8 @@ async function loadAndRenderWeatherAll(dayIndex) {
         <div class="weather-desc">${wmo.label}</div>
       </div>
       <div class="weather-precip">💧 ${w.precip}%</div>
-    </div>`;
+    </div>
+    ${goldenHourHtml}`;
   document.querySelectorAll('.weather-host').forEach(el => { el.innerHTML = widgetHtml; });
 
   // Update day tab weather icons
@@ -1686,6 +1936,7 @@ function updateRouteSummaryUI(result) {
           onclick="App.setDayRouteMode('${esc(date)}','foot')">🚶</button>
         <button class="route-mode-sm${dayMode === 'driving' ? ' active' : ''}"
           onclick="App.setDayRouteMode('${esc(date)}','driving')">🚗</button>
+        <button class="route-mode-sm replay-btn" onclick="App.startRouteReplay()" title="Replay route">▶️</button>
       </div>`;
   });
 }
@@ -1704,12 +1955,20 @@ function renderDayTabs() {
   const html = State.trip.days.map((day, i) => {
     const active = i === State.selectedDayIndex;
     const color = getDayColor(i);
+    // Day quality glow — compute lightweight score for glow intensity
+    const plan = State.plan[day.date] || [];
+    const poiCount = plan.length;
+    const metrics = poiCount > 0 ? calcDayMetrics(i, null) : null;
+    const score = metrics ? metrics.overall : 0;
+    const glowColor = score >= 7 ? '#27ae60' : score >= 5 ? '#2980b9' : score >= 3 ? '#f39c12' : 'transparent';
+    const glowStyle = score >= 3 ? `box-shadow: 0 0 8px 2px ${glowColor}40;` : '';
     return `<div class="day-tab${active ? ' active' : ''}" data-idx="${i}" onclick="App.selectDay(${i})"
-        style="${active ? `background:${color};` : ''}">
+        style="${active ? `background:${color};` : ''}${glowStyle}">
       <div class="tab-emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
       <div class="tab-weather"></div>
       <div class="tab-label">${esc(getEffectiveDayLabel(day))}</div>
       <div class="tab-date">${formatShortDate(day.date)}</div>
+      ${score >= 3 ? `<div class="tab-score-dot" style="background:${glowColor};" title="Day score: ${score.toFixed(1)}/10"></div>` : ''}
     </div>`;
   }).join('');
 
@@ -1851,6 +2110,7 @@ function renderDayPlanContent(dayIndex) {
 
     <!-- TAB: Plan -->
     <div class="day-tab-panel" data-panel="plan">
+      ${generateDayNarrative(dayIndex, plan, hasInterCity, depCity, arrCity)}
       <div class="route-summary"><span style="font-size:11px;color:var(--color-text-light);">Calculating route…</span></div>
       ${departCardHtml}
       <div class="poi-list" data-day="${dayIndex}">
@@ -1929,6 +2189,11 @@ function renderDayPlanContent(dayIndex) {
     if (poiList) poiList.dataset.dayIndex = dayIndex;
     initDragDrop(poiList);
     initTouchDrag(poiList);
+    // Staggered entrance animation for POI cards
+    el.querySelectorAll('.poi-card, .add-poi-card').forEach((card, i) => {
+      card.classList.add('card-enter');
+      card.style.animationDelay = `${i * 40}ms`;
+    });
   });
 
   // Render day metrics (walkKm = 0 initially; updated after route loads)
@@ -2636,6 +2901,40 @@ function initBottomSheet() {
   });
 }
 
+// ─── Swipe Between Days (Mobile) ────────────────────────────────
+function initDaySwipe(container) {
+  if (!container || container._swipeBound) return;
+  container._swipeBound = true;
+  let startX = 0, startY = 0, swiping = false;
+  const THRESHOLD = 60, MAX_Y = 40;
+
+  container.addEventListener('touchstart', e => {
+    if (e.target.closest('.drag-handle')) return; // don't interfere with drag-reorder
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    swiping = true;
+  }, { passive: true });
+
+  container.addEventListener('touchmove', e => {
+    if (!swiping) return;
+    const dy = Math.abs(e.touches[0].clientY - startY);
+    if (dy > MAX_Y) swiping = false; // vertical scroll — cancel
+  }, { passive: true });
+
+  container.addEventListener('touchend', e => {
+    if (!swiping) return;
+    swiping = false;
+    const dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dx) < THRESHOLD) return;
+    const total = State.trip?.days.length || 0;
+    if (dx < 0 && State.selectedDayIndex < total - 1) {
+      selectDay(State.selectedDayIndex + 1);
+    } else if (dx > 0 && State.selectedDayIndex > 0) {
+      selectDay(State.selectedDayIndex - 1);
+    }
+  }, { passive: true });
+}
+
 // ─── Sidebar & Bottom Sheet: Build DOM ─────────────────────────
 function buildSidebarDOM() {
   const sidebar = document.getElementById('sidebar');
@@ -2659,6 +2958,7 @@ function buildBottomSheetDOM() {
     <div class="plan-content-host" style="flex:1;overflow-y:auto;scrollbar-width:thin;"></div>
   `;
   inner.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;';
+  initDaySwipe(inner.querySelector('.plan-content-host'));
 }
 
 // ─── Settings Modal ────────────────────────────────────────────
@@ -2797,7 +3097,38 @@ function updateTripOverviewContent() {
     familyFriendly: tripMetrics.avgFamilyFriendly,
   };
 
+  // ── Trip Timeline (Bifröst bridge) ──
+  const timelineHtml = State.trip.days.map((day, i) => {
+    const m = tripMetrics.allMetrics[i];
+    const score = m ? m.overall : 0;
+    const color = getDayColor(i);
+    const plan = State.plan[day.date] || [];
+    const poiCount = plan.length;
+    const acc = getEffectiveAcc(day.date);
+    const accName = acc ? (State.accEdits[acc.id]?.name || acc.name) : '';
+    const label = getEffectiveDayLabel(day);
+    const emoji = State.dayEmojis?.[day.date] || day.emoji;
+    return `<div class="timeline-node" onclick="App.selectDay(${i});App.closeTripOverviewModal();">
+      <div class="timeline-dot" style="background:${color};box-shadow:0 0 6px ${color}80;"></div>
+      <div class="timeline-content">
+        <div class="timeline-day-label">${emoji} ${esc(label)}</div>
+        <div class="timeline-day-meta">${formatShortDate(day.date)} · ${poiCount} stops · ${esc(accName)}</div>
+        <div class="timeline-score-bar"><div class="timeline-score-fill" style="width:${score * 10}%;background:${color};"></div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Day Comparison Radar ──
+  const comparisonRadarHtml = renderComparisonRadarSVG(tripMetrics);
+
+  // ── Packing Weather Summary ──
+  const packingHtml = renderPackingWeatherSummary();
+
   content.innerHTML = `
+    <div class="metric-section">
+      <div class="metric-section-title">🌈 Trip Timeline</div>
+      <div class="trip-timeline">${timelineHtml}</div>
+    </div>
     <div class="metric-section">
       <div class="metric-section-title">💰 Total Estimated Budget</div>
       <div class="trip-budget-total">€${tripMetrics.totalCost.toFixed(0)}</div>
@@ -2819,6 +3150,10 @@ function updateTripOverviewContent() {
         ${renderMetricBar('🧒', 'Kids Fun', tripMetrics.avgKidsFun)}
         ${renderMetricBar('🔧', 'Logistics', 10 - tripMetrics.avgLogisticalFriction, true)}
       </div>
+    </div>
+    <div class="metric-section">
+      <div class="metric-section-title">🔀 Day Comparison</div>
+      <div class="radar-chart-container">${comparisonRadarHtml}</div>
     </div>
     <div class="radar-chart-container">
       ${renderRadarChartSVG(overviewMetrics, accentColor)}
@@ -2844,6 +3179,7 @@ function updateTripOverviewContent() {
         </div>
       </div>
     </div>
+    ${packingHtml}
     ${suggestionsHtml}
   `;
 
@@ -5225,6 +5561,8 @@ window.App = {
   dismissSharedPlan,
   importPlanFile,
   resetApiQuota,
+  startRouteReplay,
+  stopRouteReplay,
 };
 
 // ─── Initialization ────────────────────────────────────────────

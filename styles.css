@@ -2157,6 +2157,149 @@ body.modal-open #map {
 .auth-google-btn:hover { background: #f7f8f8; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
 
 /* ═══════════════════════════════════════════════════════════════
+   UX ENHANCEMENTS
+═══════════════════════════════════════════════════════════════ */
+
+/* ─── POI Card Entrance Animation ─────────────────────────────── */
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.card-enter {
+  animation: card-enter 0.28s ease-out both;
+}
+
+/* ─── Day Tab Quality Score Dot ───────────────────────────────── */
+.tab-score-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  margin-top: 2px;
+}
+
+/* ─── Golden Hour Row ─────────────────────────────────────────── */
+.golden-hour-row {
+  display: flex; gap: 10px; align-items: center;
+  padding: 4px 12px 2px;
+  font-size: 12px; color: var(--color-text-secondary);
+}
+.golden-hour-item { white-space: nowrap; }
+.golden-hour-item.golden { color: #e07b54; font-weight: 600; }
+
+/* ─── Confetti ────────────────────────────────────────────────── */
+@keyframes confetti-burst {
+  0%   { opacity: 1; transform: translate(0,0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(720deg) scale(0.3); }
+}
+.confetti-particle {
+  position: absolute;
+  width: 6px; height: 6px;
+  border-radius: 2px;
+  top: 10px;
+  pointer-events: none;
+  z-index: 100;
+  animation: confetti-burst 0.9s ease-out both;
+}
+
+/* ─── Day Narrative ───────────────────────────────────────────── */
+.day-narrative {
+  padding: 8px 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  border-left: 3px solid var(--color-accent);
+  margin: 4px 8px 8px;
+  background: var(--color-accent-light);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* ─── Route Replay ────────────────────────────────────────────── */
+.replay-btn { font-size: 11px !important; }
+
+.replay-marker { background: none; border: none; }
+.replay-marker-dot {
+  width: 16px; height: 16px;
+  background: var(--color-accent);
+  border: 3px solid white;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  animation: replay-pulse 0.6s ease-in-out infinite alternate;
+}
+@keyframes replay-pulse {
+  from { transform: scale(1); }
+  to   { transform: scale(1.25); }
+}
+
+/* ─── Trip Timeline ───────────────────────────────────────────── */
+.trip-timeline {
+  position: relative;
+  padding-left: 16px;
+}
+.trip-timeline::before {
+  content: '';
+  position: absolute;
+  left: 9px; top: 8px; bottom: 8px;
+  width: 3px;
+  background: linear-gradient(180deg, #e53935, #f9a825, #2e7d32, #1565c0, #6a1b9a);
+  border-radius: 2px;
+}
+.timeline-node {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-radius: var(--radius-sm);
+}
+.timeline-node:hover { background: var(--color-card-bg); }
+.timeline-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+  position: relative;
+  z-index: 1;
+}
+.timeline-content { flex: 1; min-width: 0; }
+.timeline-day-label { font-size: 13px; font-weight: 600; color: var(--color-text); }
+.timeline-day-meta { font-size: 11px; color: var(--color-text-light); margin-top: 1px; }
+.timeline-score-bar {
+  height: 4px; border-radius: 2px;
+  background: var(--color-border);
+  margin-top: 4px; width: 100%;
+}
+.timeline-score-fill {
+  height: 100%; border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* ─── Day Comparison Legend ───────────────────────────────────── */
+.comparison-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 12px;
+  justify-content: center;
+  margin-top: 6px; font-size: 11px;
+  color: var(--color-text-secondary);
+}
+.comparison-legend-item { display: flex; align-items: center; gap: 4px; }
+.comparison-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ─── Packing Guide ───────────────────────────────────────────── */
+.packing-summary { padding: 4px 0; }
+.packing-temp-range {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; margin-bottom: 8px;
+}
+.packing-temp-bar {
+  flex: 1; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, #2980b9, #27ae60, #f39c12, #e74c3c);
+  position: relative; overflow: hidden;
+}
+.packing-temp-fill {
+  position: absolute; top: 0; bottom: 0;
+  background: white; opacity: 0.7; border-radius: 4px;
+}
+.packing-items { display: flex; flex-direction: column; gap: 4px; }
+.packing-item { font-size: 12.5px; color: var(--color-text); padding: 2px 0; }
+
+/* ═══════════════════════════════════════════════════════════════
    MOBILE LAYOUT  (≤ 767px)
 ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
@@ -2484,4 +2627,16 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   /* Scrollbar */
   ::-webkit-scrollbar-track { background: var(--color-sidebar-bg); }
   ::-webkit-scrollbar-thumb { background: #444; }
+
+  /* Day narrative */
+  .day-narrative { background: #2a2018; border-left-color: var(--color-accent); color: #bbb; }
+
+  /* Timeline */
+  .timeline-node:hover { background: var(--color-card-bg); }
+  .timeline-day-label { color: var(--color-text); }
+  .timeline-score-bar { background: #333; }
+
+  /* Packing */
+  .packing-temp-fill { background: var(--color-sidebar-bg); }
+  .packing-item { color: var(--color-text); }
 }

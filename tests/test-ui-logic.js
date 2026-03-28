@@ -647,4 +647,71 @@ test('loadSharedPlan is async and awaits loadTrip', () => {
     'loadSharedPlan should not use requestAnimationFrame');
 });
 
+// ─── Day Narrative ──────────────────────────────────────────────
+
+test('generateDayNarrative: returns narrative HTML for day with POIs', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const html = ctx.generateDayNarrative(0, ['poi-1', 'poi-2'], false, 'Lisbon', '');
+  assert.ok(html.includes('day-narrative'), 'Should contain day-narrative class');
+  assert.ok(html.includes('Lisbon'), 'Should mention departure city');
+  assert.ok(html.includes('2 stops'), 'Should mention POI count');
+});
+
+test('generateDayNarrative: returns placeholder for empty day', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const html = ctx.generateDayNarrative(0, [], false, '', '');
+  assert.ok(html.includes('No activities planned'), 'Should show empty state');
+});
+
+test('generateDayNarrative: includes travel narrative for inter-city days', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const html = ctx.generateDayNarrative(1, ['poi-1'], true, 'Lisbon', 'Sintra');
+  assert.ok(html.includes('Lisbon'), 'Should mention departure city');
+  assert.ok(html.includes('Sintra'), 'Should mention arrival city');
+  assert.ok(html.includes('journey'), 'Should use travel language');
+});
+
+// ─── Comparison Radar ───────────────────────────────────────────
+
+test('renderComparisonRadarSVG: produces SVG with day polygons', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const tripMetrics = ctx.calcTripMetrics();
+  const svg = ctx.renderComparisonRadarSVG(tripMetrics);
+  assert.ok(svg.includes('<svg'), 'Should contain SVG');
+  assert.ok(svg.includes('<polygon'), 'Should have day polygons');
+  assert.ok(svg.includes('comparison-legend'), 'Should have legend');
+});
+
+// ─── Packing Weather Summary ────────────────────────────────────
+
+test('renderPackingWeatherSummary: returns empty when no weather cached', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  const html = ctx.renderPackingWeatherSummary();
+  assert.strictEqual(html, '', 'Should return empty string with no cached weather');
+});
+
+test('renderPackingWeatherSummary: generates suggestions from cached weather', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Simulate cached weather
+  ctx.State.weatherCache['38.69,-9.22,2026-06-01'] = { tempMax: 32, tempMin: 18, precip: 10, code: 0 };
+  ctx.State.weatherCache['38.69,-9.22,2026-06-02'] = { tempMax: 28, tempMin: 12, precip: 60, code: 63 };
+  ctx.State.weatherCache['38.79,-9.39,2026-06-03'] = { tempMax: 25, tempMin: 14, precip: 20, code: 1 };
+
+  const html = ctx.renderPackingWeatherSummary();
+  assert.ok(html.includes('Packing Guide'), 'Should have packing title');
+  assert.ok(html.includes('sunscreen') || html.includes('umbrella'), 'Should have weather-based suggestion');
+});
+
 module.exports = tests;
