@@ -10,6 +10,59 @@ const _cfg = window.__APP_CONFIG || {};
 const firebaseConfig = _cfg.firebase || {};
 const ALLOWED_EMAILS = _cfg.allowedEmails || [];
 
+// ─── Logging & Instrumentation ──────────────────────────────
+const Log = {
+  _entries: [],
+  _max: 500,
+
+  _add(level, category, message, detail) {
+    const entry = {
+      ts: new Date().toISOString(),
+      level,     // 'info' | 'warn' | 'error'
+      cat: category, // 'api' | 'db' | 'auth' | 'action'
+      msg: message,
+      detail,
+    };
+    this._entries.push(entry);
+    if (this._entries.length > this._max) this._entries.shift();
+    const style = { info: 'color:#64b5f6', warn: 'color:#ffa726', error: 'color:#ef5350' }[level] || '';
+    console.log(`%c[${category.toUpperCase()}] ${message}`, style, detail ?? '');
+  },
+
+  api(service, url, status, durationMs, extra) {
+    const short = url.length > 100 ? url.slice(0, 100) + '…' : url;
+    const ok = status >= 200 && status < 300;
+    this._add(ok ? 'info' : 'warn', 'api', `${service} → ${status} (${durationMs}ms)`, { url: short, ...extra });
+  },
+
+  db(op, path, summary) {
+    this._add('info', 'db', `${op.toUpperCase()} ${path}`, summary);
+  },
+
+  auth(message, detail) {
+    this._add('info', 'auth', message, detail);
+  },
+
+  action(message, detail) {
+    this._add('info', 'action', message, detail);
+  },
+
+  warn(category, message, detail) {
+    this._add('warn', category, message, detail);
+  },
+
+  error(category, message, detail) {
+    this._add('error', category, message, detail);
+  },
+
+  // Dump recent entries (call from console: Log.dump() or Log.dump('api'))
+  dump(filterCat, count = 50) {
+    let entries = this._entries;
+    if (filterCat) entries = entries.filter(e => e.cat === filterCat);
+    return entries.slice(-count);
+  },
+};
+
 // Initialize Firebase
 const firebaseApp = firebase.initializeApp(firebaseConfig);
 const firebaseAuth = firebase.auth();
@@ -25,6 +78,7 @@ const Auth = {
         if (user) {
           // Check allowlist
           if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(user.email)) {
+            Log.warn('auth', 'Access denied', { email: user.email });
             alert(`Access denied for ${user.email}.\nContact the trip owner.`);
             firebaseAuth.signOut();
             Auth.showGate();
@@ -32,6 +86,7 @@ const Auth = {
             return;
           }
           Auth.user = { uid: user.uid, name: user.displayName, email: user.email, picture: user.photoURL };
+          Log.auth('Signed in', { email: user.email, uid: user.uid });
           Auth.showApp();
           resolve(true);
         } else {
@@ -65,7 +120,7 @@ const Auth = {
       // onAuthStateChanged will handle the rest
     } catch (e) {
       if (e.code === 'auth/popup-closed-by-user') return;
-      console.error('Sign-in failed:', e.code, e.message);
+      Log.error('auth', 'Sign-in failed', { code: e.code, message: e.message });
       const msgs = {
         'auth/unauthorized-domain': `This domain is not authorized for sign-in.\nAdd it to Firebase Console → Authentication → Authorized domains.`,
         'auth/operation-not-allowed': 'Google sign-in is not enabled.\nEnable it in Firebase Console → Authentication → Sign-in method.',
@@ -136,21 +191,27 @@ const DB = {
   async get(path) {
     try {
       const snap = await dbRef(path).once('value');
-      return snap.val();
-    } catch (e) { console.error('DB get failed:', path, e); return null; }
+      const val = snap.val();
+      Log.db('get', path, val != null ? 'found' : 'empty');
+      return val;
+    } catch (e) { Log.error('db', `GET failed: ${path}`, e.message); return null; }
   },
   async set(path, data) {
     try {
       await dbRef(path).set(data);
+      const summary = Array.isArray(data) ? `[${data.length} items]`
+        : data && typeof data === 'object' ? `{${Object.keys(data).join(', ')}}` : String(data);
+      Log.db('set', path, summary);
     } catch (e) {
-      console.error('DB set failed:', path, e);
+      Log.error('db', `SET failed: ${path}`, e.message);
       if (typeof showToast === 'function') showToast('⚠️ Save failed — check connection');
     }
   },
   async remove(path) {
     try {
       await dbRef(path).remove();
-    } catch (e) { console.error('DB remove failed:', path, e); }
+      Log.db('remove', path);
+    } catch (e) { Log.error('db', `REMOVE failed: ${path}`, e.message); }
   },
 };
 
@@ -399,6 +460,25 @@ function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+// ─── Modal scroll lock ─────────────────────────────────────────
+let _scrollLockCount = 0;
+function lockBodyScroll() {
+  if (++_scrollLockCount === 1) document.body.classList.add('modal-open');
+}
+function unlockBodyScroll() {
+  if (--_scrollLockCount <= 0) { _scrollLockCount = 0; document.body.classList.remove('modal-open'); }
+}
+function openModal(el) {
+  if (!el) return;
+  el.classList.remove('hidden');
+  lockBodyScroll();
+}
+function closeModal(el) {
+  if (!el) return;
+  el.classList.add('hidden');
+  unlockBodyScroll();
+}
+
 function getPoi(id) {
   return State.trip?.pois.find(p => p.id === id) ?? null;
 }
@@ -466,20 +546,21 @@ function showToast(msg, ms = 2500) {
 async function fetchThumb(title) {
   if (!title) return null;
   if (State.thumbnailCache[title] !== undefined) return State.thumbnailCache[title];
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  const t0 = Date.now();
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
-    const r = await fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
-      { signal: ctrl.signal }
-    );
+    const r = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
+    Log.api('Wikipedia', url, r.status, Date.now() - t0, { title });
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
-    const url = d.thumbnail?.source ?? null;
-    State.thumbnailCache[title] = url;
-    return url;
-  } catch (_) {
+    const thumbUrl = d.thumbnail?.source ?? null;
+    State.thumbnailCache[title] = thumbUrl;
+    return thumbUrl;
+  } catch (e) {
+    Log.warn('api', `Wikipedia failed: ${title}`, e.message);
     State.thumbnailCache[title] = null;
     return null;
   }
@@ -489,17 +570,19 @@ async function fetchThumb(title) {
 async function fetchWeather(lat, lng, date) {
   const key = `${lat.toFixed(2)},${lng.toFixed(2)},${date}`;
   if (State.weatherCache[key] !== undefined) return State.weatherCache[key];
+  const url = [
+    'https://api.open-meteo.com/v1/forecast',
+    `?latitude=${lat}&longitude=${lng}`,
+    `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode`,
+    `&timezone=auto&start_date=${date}&end_date=${date}`,
+  ].join('');
+  const t0 = Date.now();
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 6000);
-    const url = [
-      'https://api.open-meteo.com/v1/forecast',
-      `?latitude=${lat}&longitude=${lng}`,
-      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode`,
-      `&timezone=auto&start_date=${date}&end_date=${date}`,
-    ].join('');
     const r = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
+    Log.api('Open-Meteo', url, r.status, Date.now() - t0, { date });
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     const w = {
@@ -510,7 +593,8 @@ async function fetchWeather(lat, lng, date) {
     };
     State.weatherCache[key] = w;
     return w;
-  } catch (_) {
+  } catch (e) {
+    Log.warn('api', `Open-Meteo failed: ${date}`, e.message);
     State.weatherCache[key] = null;
     return null;
   }
@@ -521,12 +605,14 @@ async function fetchRoute(waypoints, mode) {
   if (waypoints.length < 2) return null;
   const coordStr = waypoints.map(([la, ln]) => `${ln},${la}`).join(';');
   const profile = mode === 'driving' ? 'driving' : 'foot';
+  const url = `https://router.project-osrm.org/route/v1/${profile}/${coordStr}?overview=full&geometries=geojson`;
+  const t0 = Date.now();
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 7000);
-    const url = `https://router.project-osrm.org/route/v1/${profile}/${coordStr}?overview=full&geometries=geojson`;
     const r = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
+    Log.api('OSRM', url, r.status, Date.now() - t0, { mode, waypoints: waypoints.length });
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     if (d.code !== 'Ok' || !d.routes?.length) throw new Error('no route');
@@ -537,8 +623,8 @@ async function fetchRoute(waypoints, mode) {
       durMin: route.duration / 60,
       isFallback: false,
     };
-  } catch (_) {
-    // Fallback: straight-line Haversine estimate
+  } catch (e) {
+    Log.warn('api', `OSRM fallback (haversine): ${mode}, ${waypoints.length} pts`, e.message);
     let km = 0;
     for (let i = 0; i < waypoints.length - 1; i++) {
       km += haversineKm(waypoints[i][0], waypoints[i][1], waypoints[i+1][0], waypoints[i+1][1]);
@@ -1016,7 +1102,7 @@ function renderDayMetricsUI(dayIndex, routeDistKm) {
   const suggestionsHtml = metrics.suggestions.length > 0
     ? `<div class="suggestions-list">${metrics.suggestions.map(s => {
         const typeIcon = s.type === 'warning' ? '⚠️' : s.type === 'tip' ? '💡' : '✅';
-        const addBtn = s.poiId ? ` <button class="suggestion-add-btn" onclick="App.addPoi('${s.poiId}')">Add</button>` : '';
+        const addBtn = s.poiId ? ` <button class="suggestion-add-btn" onclick="App.addPoi('${esc(s.poiId)}')">Add</button>` : '';
         return `<div class="suggestion suggestion-${s.type}">${typeIcon} ${esc(s.text)}${addBtn}</div>`;
       }).join('')}</div>`
     : '';
@@ -1140,7 +1226,7 @@ function buildPopupHTML(poi) {
       ${booked}
     </div>
     <div style="font-size:11px;color:#888;margin-bottom:6px;">${getKidsHtml(poi.kidsRating || poi.kidsFriendly || 3)}</div>
-    <button onclick="App.openDetail('${poi.id}')"
+    <button onclick="App.openDetail('${esc(poi.id)}')"
       style="display:block;width:100%;padding:5px 8px;background:var(--color-accent);color:white;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
       View Details
     </button>
@@ -1265,9 +1351,12 @@ function clearAllRoutes() {
   State.lastInterCityResult = null;
 }
 
+let _inCityRouteGen = 0; // prevents stale async in-city routes
+
 async function drawRoute(dayIndex) {
   if (!State.map) return;
   clearAllRoutes();
+  const gen = ++_inCityRouteGen;
 
   const day = getDay(dayIndex);
   if (!day) return;
@@ -1298,8 +1387,6 @@ async function drawRoute(dayIndex) {
       renderDayMetricsUI(dayIndex, 0);
     } else {
       const dayMode = getEffectiveRouteMode(day.date);
-      // Walking: route between POIs only (you walk between sights, not from/to hotel)
-      // Driving: include acc as start/end (you drive from hotel to sights and back)
       const inCityWaypoints = [];
       if (dayMode === 'driving' && arrCoords?.lat && arrCoords?.lng) {
         inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
@@ -1309,9 +1396,9 @@ async function drawRoute(dayIndex) {
         inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
       }
       const result = await fetchRoute(inCityWaypoints.length >= 2 ? inCityWaypoints : poiWaypoints, dayMode);
+      if (gen !== _inCityRouteGen) return; // stale — user already switched days
       if (result) {
         State.lastRouteResult = result;
-        // In-city: walking=blue dashed, driving=blue solid
         const routeStyle = dayMode === 'foot'
           ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
           : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
@@ -1329,7 +1416,7 @@ async function drawRoute(dayIndex) {
     }
   }
   // Fit map to show the full route including accommodations
-  fitMapToDay(dayIndex);
+  if (gen === _inCityRouteGen) fitMapToDay(dayIndex);
 }
 
 // ─── Inter-City Route ──────────────────────────────────────────
@@ -1363,6 +1450,7 @@ const _airportCache = {};
 async function findNearestAirport(lat, lng) {
   const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
   if (_airportCache[key] !== undefined) return _airportCache[key];
+  const t0 = Date.now();
   try {
     // Query both node and way — airports are usually mapped as ways/relations in OSM
     const q = `[out:json][timeout:12];
@@ -1373,6 +1461,7 @@ async function findNearestAirport(lat, lng) {
     const r = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST', body: 'data=' + encodeURIComponent(q),
     });
+    Log.api('Overpass (airports)', 'overpass-api.de', r.status, Date.now() - t0, { lat, lng });
     if (!r.ok) { _airportCache[key] = null; return null; }
     const data = await r.json();
     const airports = (data.elements || [])
@@ -1593,9 +1682,9 @@ function updateRouteSummaryUI(result) {
         <span class="stat-value">${formatDist(result.distKm)}</span></div>
       <div class="route-mode-toggle">
         <button class="route-mode-sm${dayMode === 'foot' ? ' active' : ''}"
-          onclick="App.setDayRouteMode('${date}','foot')">🚶</button>
+          onclick="App.setDayRouteMode('${esc(date)}','foot')">🚶</button>
         <button class="route-mode-sm${dayMode === 'driving' ? ' active' : ''}"
-          onclick="App.setDayRouteMode('${date}','driving')">🚗</button>
+          onclick="App.setDayRouteMode('${esc(date)}','driving')">🚗</button>
       </div>`;
   });
 }
@@ -1677,7 +1766,7 @@ function renderDayPlanContent(dayIndex) {
       const name = edit.name || a.name;
       return `<option value="${a.id}"${a.id === selectedId ? ' selected' : ''}>${esc(name)}</option>`;
     }).join('');
-    return `<select class="acc-picker-select" onchange="App.setDayAcc('${date}', this.value)">
+    return `<select class="acc-picker-select" onchange="App.setDayAcc('${esc(date)}', this.value)">
       <option value="">— none —</option>
       ${opts}
       <option value="__new__">➕ Add new…</option>
@@ -1713,7 +1802,7 @@ function renderDayPlanContent(dayIndex) {
         <div class="acc-name"><span class="text-xs text-secondary">Arrive — </span>${accSelectHtml(arrivalAcc?.id || '', day.date)}</div>
         <div class="acc-note">${[city, notes, priceStr].filter(Boolean).join(' · ')}</div>
       </div>
-      ${arrivalAcc && !arrivalAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${arrivalAcc.id}')" title="Edit accommodation">✏️</button>` : ''}
+      ${arrivalAcc && !arrivalAcc.isHome ? `<button class="btn-icon btn-edit-sm acc-edit-btn" onclick="App.openAccEditModal('${esc(arrivalAcc.id)}')" title="Edit accommodation">✏️</button>` : ''}
     </div>`;
   })();
 
@@ -1735,7 +1824,7 @@ function renderDayPlanContent(dayIndex) {
           <div class="day-header-emoji" id="day-emoji-${day.date}" contenteditable="true" spellcheck="false"
             onblur="App.saveDayEmoji('${day.date}', this.textContent)"
             onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-            onclick="App.toggleEmojiPicker('day-emoji-picker-${day.date}')"
+            onclick="App.toggleEmojiPicker('day-emoji-picker-${esc(day.date)}')"
             title="Click to change emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
           <div id="day-emoji-picker-${day.date}" class="hidden day-emoji-picker-dropdown">
             ${buildEmojiPickerHtml('day-emoji-' + day.date, 'day-emoji-grid')}
@@ -1835,8 +1924,10 @@ function renderDayPlanContent(dayIndex) {
 
   document.querySelectorAll('.plan-content-host').forEach(el => {
     el.innerHTML = contentHtml;
-    initDragDrop(el.querySelector('.poi-list'), dayIndex);
-    initTouchDrag(el.querySelector('.poi-list'), dayIndex);
+    const poiList = el.querySelector('.poi-list');
+    if (poiList) poiList.dataset.dayIndex = dayIndex;
+    initDragDrop(poiList);
+    initTouchDrag(poiList);
   });
 
   // Render day metrics (walkKm = 0 initially; updated after route loads)
@@ -1880,15 +1971,15 @@ function buildPoiCardHtml(poiId, idx) {
       <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
     </div>
     <div class="poi-actions">
-      <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${poiId}')" title="Edit">✏️</button>
-      <button class="btn-icon btn-detail" onclick="App.openDetail('${poiId}')" title="Details">ℹ</button>
+      <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${esc(poiId)}')" title="Edit">✏️</button>
+      <button class="btn-icon btn-detail" onclick="App.openDetail('${esc(poiId)}')" title="Details">ℹ</button>
       <select class="btn-move-day" onchange="App.movePoiToDay('${poiId}', this.value); this.selectedIndex=0;" title="Move to another day">
         <option value="">↷</option>
         ${State.trip.days.map((d, i) => i === State.selectedDayIndex ? '' :
           `<option value="${d.date}">${formatShortDate(d.date)}</option>`
         ).join('')}
       </select>
-      ${isBooked ? '' : `<button class="btn-icon btn-remove" onclick="App.removePoi('${poiId}')" title="Remove">✕</button>`}
+      ${isBooked ? '' : `<button class="btn-icon btn-remove" onclick="App.removePoi('${esc(poiId)}')" title="Remove">✕</button>`}
     </div>
   </div>`;
 }
@@ -1898,28 +1989,31 @@ function buildAddCardHtml(poi) {
   const icon = poi.emoji || cat.icon;
   return `<div class="add-poi-card">
     <div class="add-poi-icon">${icon}</div>
-    <div class="add-poi-info" onclick="App.addPoi('${poi.id}')">
+    <div class="add-poi-info" onclick="App.addPoi('${esc(poi.id)}')">
       <div class="add-poi-name">${esc(poi.name)}${poi.confirmedBooking ? ' ⭐' : ''}</div>
       <div class="add-poi-meta">${poi.duration}h · ${poi.costLabel || 'Free'}</div>
       ${poi.rating ? `<div class="poi-stars">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</div>` : ''}
       <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
     </div>
-    <button class="btn-icon btn-edit-sm" onclick="App.openPoiEditModal('${poi.id}')" title="Edit">✏️</button>
-    <button class="btn-add-poi" onclick="App.addPoi('${poi.id}')">+</button>
+    <button class="btn-icon btn-edit-sm" onclick="App.openPoiEditModal('${esc(poi.id)}')" title="Edit">✏️</button>
+    <button class="btn-add-poi" onclick="App.addPoi('${esc(poi.id)}')">+</button>
   </div>`;
 }
 
 // ─── Thumbnail Loading ─────────────────────────────────────────
+let _thumbGen = 0;
 async function loadThumbsForDay(dayIndex) {
+  const gen = ++_thumbGen;
   const day = getDay(dayIndex);
   if (!day) return;
   const plan = State.plan[day.date] || [];
   for (const id of plan) {
+    if (gen !== _thumbGen) return; // user switched days
     const poi = getPoi(id);
     if (!poi?.wikipediaTitle) continue;
     const url = await fetchThumb(poi.wikipediaTitle);
+    if (gen !== _thumbGen) return; // stale
     if (!url) continue;
-    // Update all rendered thumbnail elements (desktop sidebar + mobile sheet)
     document.querySelectorAll(`[id="pt-${id}"]`).forEach(el => {
       el.innerHTML = `<img src="${url}" alt="${esc(poi.name)}" loading="lazy">`;
     });
@@ -1927,92 +2021,103 @@ async function loadThumbsForDay(dayIndex) {
 }
 
 // ─── Drag and Drop (Desktop HTML5) ─────────────────────────────
-function initDragDrop(listEl, dayIndex) {
-  if (!listEl) return;
+// Uses event delegation on the list element — attach once, works for any cards.
+function initDragDrop(listEl) {
+  if (!listEl || listEl._dragBound) return;
+  listEl._dragBound = true;
   let srcId = null;
 
-  listEl.querySelectorAll('.poi-card[draggable]').forEach(card => {
-    card.addEventListener('dragstart', e => {
-      srcId = card.dataset.poiId;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('dragging');
-      listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-    });
-    card.addEventListener('dragover', e => {
-      e.preventDefault();
-      listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-      card.classList.add('drag-over');
-    });
-    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-    card.addEventListener('drop', e => {
-      e.preventDefault();
-      const tgtId = card.dataset.poiId;
-      if (!srcId || srcId === tgtId) return;
-      reorderPlan(dayIndex, srcId, tgtId);
-    });
+  listEl.addEventListener('dragstart', e => {
+    const card = e.target.closest('.poi-card[draggable]');
+    if (!card) return;
+    srcId = card.dataset.poiId;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  listEl.addEventListener('dragend', e => {
+    const card = e.target.closest('.poi-card');
+    if (card) card.classList.remove('dragging');
+    listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+  });
+  listEl.addEventListener('dragover', e => {
+    e.preventDefault();
+    listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    const card = e.target.closest('.poi-card');
+    if (card) card.classList.add('drag-over');
+  });
+  listEl.addEventListener('dragleave', e => {
+    const card = e.target.closest('.poi-card');
+    if (card) card.classList.remove('drag-over');
+  });
+  listEl.addEventListener('drop', e => {
+    e.preventDefault();
+    const card = e.target.closest('.poi-card');
+    const tgtId = card?.dataset.poiId;
+    if (!srcId || !tgtId || srcId === tgtId) return;
+    reorderPlan(parseInt(listEl.dataset.dayIndex), srcId, tgtId);
   });
 }
 
 // ─── Touch Drag (Mobile) ───────────────────────────────────────
-function initTouchDrag(listEl, dayIndex) {
-  if (!listEl) return;
+// Uses event delegation — single set of listeners per list element.
+function initTouchDrag(listEl) {
+  if (!listEl || listEl._touchDragBound) return;
+  listEl._touchDragBound = true;
 
-  listEl.querySelectorAll('.drag-handle').forEach(handle => {
-    let srcId = null;
-    let ghost = null;
-    let origCard = null;
-    let lastY = 0;
+  let srcId = null;
+  let ghost = null;
+  let origCard = null;
+  let lastY = 0;
 
-    handle.addEventListener('touchstart', e => {
-      origCard = handle.closest('.poi-card');
-      if (!origCard) return;
-      srcId = origCard.dataset.poiId;
-      lastY = e.touches[0].clientY;
-      origCard.style.opacity = '0.4';
+  listEl.addEventListener('touchstart', e => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    origCard = handle.closest('.poi-card');
+    if (!origCard) return;
+    srcId = origCard.dataset.poiId;
+    lastY = e.touches[0].clientY;
+    origCard.style.opacity = '0.4';
 
-      ghost = origCard.cloneNode(true);
-      const rect = origCard.getBoundingClientRect();
-      ghost.style.cssText = `
-        position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;
-        z-index:9999;opacity:0.9;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,0.25);
-        border-radius:10px;background:white;`;
-      document.body.appendChild(ghost);
-    }, { passive: true });
+    ghost = origCard.cloneNode(true);
+    const rect = origCard.getBoundingClientRect();
+    ghost.style.cssText = `
+      position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;
+      z-index:9999;opacity:0.9;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,0.25);
+      border-radius:10px;background:white;`;
+    document.body.appendChild(ghost);
+  }, { passive: true });
 
-    handle.addEventListener('touchmove', e => {
-      if (!ghost) return;
-      e.preventDefault();
-      const dy = e.touches[0].clientY - lastY;
-      lastY = e.touches[0].clientY;
-      const top = parseFloat(ghost.style.top) + dy;
-      ghost.style.top = top + 'px';
+  listEl.addEventListener('touchmove', e => {
+    if (!ghost) return;
+    e.preventDefault();
+    const dy = e.touches[0].clientY - lastY;
+    lastY = e.touches[0].clientY;
+    const top = parseFloat(ghost.style.top) + dy;
+    ghost.style.top = top + 'px';
 
-      // Find card under finger
-      ghost.style.visibility = 'hidden';
-      const underEl = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-      ghost.style.visibility = '';
-      listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-      const tgtCard = underEl?.closest('.poi-card');
-      if (tgtCard && tgtCard !== origCard) tgtCard.classList.add('drag-over');
-    }, { passive: false });
+    // Find card under finger
+    ghost.style.visibility = 'hidden';
+    const underEl = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+    ghost.style.visibility = '';
+    listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    const tgtCard = underEl?.closest('.poi-card');
+    if (tgtCard && tgtCard !== origCard) tgtCard.classList.add('drag-over');
+  }, { passive: false });
 
-    handle.addEventListener('touchend', e => {
-      if (ghost) { ghost.remove(); ghost = null; }
-      if (origCard) origCard.style.opacity = '';
+  listEl.addEventListener('touchend', e => {
+    if (!ghost) return;
+    ghost.remove();
+    if (origCard) origCard.style.opacity = '';
 
-      ghost = null;
-      const touch = e.changedTouches[0];
-      const underEl = document.elementFromPoint(touch.clientX, touch.clientY);
-      listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-      const tgtCard = underEl?.closest('.poi-card');
-      if (tgtCard && srcId && tgtCard.dataset.poiId !== srcId) {
-        reorderPlan(dayIndex, srcId, tgtCard.dataset.poiId);
-      }
-      srcId = null; origCard = null;
-    });
+    ghost = null;
+    const touch = e.changedTouches[0];
+    const underEl = document.elementFromPoint(touch.clientX, touch.clientY);
+    listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    const tgtCard = underEl?.closest('.poi-card');
+    if (tgtCard && srcId && tgtCard.dataset.poiId !== srcId) {
+      reorderPlan(parseInt(listEl.dataset.dayIndex), srcId, tgtCard.dataset.poiId);
+    }
+    srcId = null; origCard = null;
   });
 }
 
@@ -2045,6 +2150,7 @@ function addPoi(poiId) {
   if (plan.includes(poiId)) { showToast('Already in plan'); return; }
   State.plan[day.date] = [...plan, poiId];
   Storage.save();
+  Log.action('POI added to plan', { id: poiId, name: poi.name, date: day.date });
   showToast(`Added: ${poi.name}`);
   refreshDay(State.selectedDayIndex, true);
 }
@@ -2057,6 +2163,7 @@ function removePoi(poiId) {
   if (!day) return;
   State.plan[day.date] = (State.plan[day.date] || []).filter(id => id !== poiId);
   Storage.save();
+  Log.action('POI removed from plan', { id: poiId, name: poi.name, date: day.date });
   showToast(`Removed: ${poi.name}`);
   refreshDay(State.selectedDayIndex, true);
 }
@@ -2074,6 +2181,7 @@ function movePoiToDay(poiId, targetDate) {
   if (!State.plan[targetDate]) State.plan[targetDate] = [];
   if (!State.plan[targetDate].includes(poiId)) State.plan[targetDate].push(poiId);
   Storage.save();
+  Log.action('POI moved', { id: poiId, name: poi.name, from: currentDay?.date, to: targetDate });
   const targetDay = State.trip.days.find(d => d.date === targetDate);
   showToast(`Moved "${poi.name}" to ${formatShortDate(targetDate)}`);
   refreshDay(State.selectedDayIndex, true);
@@ -2158,7 +2266,7 @@ async function openDetail(poiId) {
 
   const planBtnHtml = poi.confirmedBooking
     ? `<div class="badge badge-confirmed" style="text-align:center;padding:10px;font-size:13px;">⭐ Already booked — enjoy!</div>`
-    : `<button class="btn-primary ${inPlan ? 'remove' : 'add'}" onclick="App.togglePoiInPlan('${poiId}')">
+    : `<button class="btn-primary ${inPlan ? 'remove' : 'add'}" onclick="App.togglePoiInPlan('${esc(poiId)}')">
         ${inPlan ? '✕ Remove from plan' : `+ Add to ${currentDay ? esc(currentDay.label) : 'plan'}`}
       </button>`;
 
@@ -2289,23 +2397,29 @@ function setMapStyle(style) {
 // ─── Google Places API ──────────────────────────────────────────
 async function searchGooglePlaces(query, lat, lng, radius) {
   if (!GMAPS_KEY) return null;
+  const t0 = Date.now();
   try {
     trackApiRequest();
     const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&location=${lat},${lng}&radius=${radius || 10000}&key=${GMAPS_KEY}`;
     const r = await fetch(url);
-    return r.ok ? (await r.json()).results || [] : null;
-  } catch { return null; }
+    const results = r.ok ? (await r.json()).results || [] : null;
+    Log.api('Google Places', url.replace(GMAPS_KEY, '***'), r.status, Date.now() - t0, { query, results: results?.length });
+    return results;
+  } catch (e) { Log.warn('api', `Google Places text search failed: ${query}`, e.message); return null; }
 }
 
 async function nearbyGooglePlaces(lat, lng, radius, type) {
   if (!GMAPS_KEY) return null;
+  const t0 = Date.now();
   try {
     trackApiRequest();
     const typeParam = type && type !== 'all' ? `&type=${type}` : '';
     const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius || 10000}${typeParam}&key=${GMAPS_KEY}`;
     const r = await fetch(url);
-    return r.ok ? (await r.json()).results || [] : null;
-  } catch { return null; }
+    const results = r.ok ? (await r.json()).results || [] : null;
+    Log.api('Google Places', url.replace(GMAPS_KEY, '***'), r.status, Date.now() - t0, { type, results: results?.length });
+    return results;
+  } catch (e) { Log.warn('api', `Google Places nearby failed: ${type}`, e.message); return null; }
 }
 
 function googlePlaceToDiscoverElement(place) {
@@ -2575,12 +2689,11 @@ function openSettingsModal() {
   updateQuotaDisplay();
 
   updatePartyPreview();
-  modal.classList.remove('hidden');
+  openModal(modal);
 }
 
 function closeSettingsModal() {
-  const modal = document.getElementById('settings-modal');
-  if (modal) modal.classList.add('hidden');
+  closeModal(document.getElementById('settings-modal'));
 }
 
 function updatePartyPreview() {
@@ -2642,6 +2755,13 @@ function saveSettings() {
 
   Storage.saveParty();
   Storage.saveSettings();
+  Log.action('Settings saved', {
+    party: State.partyConfig,
+    fuelPrice: State.settings.fuelPrice,
+    carConsumption: State.settings.carConsumption,
+    mealBudget: State.settings.dailyMealBudget,
+    dataSource: State.settings.dataSource,
+  });
   closeSettingsModal();
   // Re-apply map tiles to match data source toggle
   setMapStyle(State._activeMapStyle || 'map');
@@ -2732,12 +2852,11 @@ function openTripOverviewModal() {
   const modal = document.getElementById('trip-overview-modal');
   if (!modal) return;
   updateTripOverviewContent();
-  modal.classList.remove('hidden');
+  openModal(modal);
 }
 
 function closeTripOverviewModal() {
-  const modal = document.getElementById('trip-overview-modal');
-  if (modal) modal.classList.add('hidden');
+  closeModal(document.getElementById('trip-overview-modal'));
 }
 
 // ─── Import Modal ──────────────────────────────────────────────
@@ -2748,12 +2867,11 @@ function openImportModal() {
   if (ta) ta.value = '';
   const preview = document.getElementById('import-preview');
   if (preview) preview.innerHTML = '';
-  modal.classList.remove('hidden');
+  openModal(modal);
 }
 
 function closeImportModal() {
-  const modal = document.getElementById('import-modal');
-  if (modal) modal.classList.add('hidden');
+  closeModal(document.getElementById('import-modal'));
 }
 
 // ─── Per-Day Route Mode ─────────────────────────────────────────
@@ -2810,6 +2928,7 @@ function setDayAcc(date, accId) {
   }
   if (accId) State.dayAccAssignments[date] = accId;
   else delete State.dayAccAssignments[date];
+  Log.action('Day accommodation changed', { date, accId });
   Storage.save();
   clearAllRoutes();
   placeMarkers();
@@ -2832,6 +2951,7 @@ function addNewAccommodation(forDate) {
     isUserCreated: true,
   };
   State.trip.accommodations.push(newAcc);
+  Log.action('Accommodation created', { id, forDate });
   Storage.saveUserAccs(State.trip.id);
   if (forDate) {
     State.dayAccAssignments[forDate] = id;
@@ -2854,6 +2974,7 @@ function setRouteDiscoveryRadius(value) {
 function setTransportType(date, type) {
   if (!State.dayTransport[date]) State.dayTransport[date] = {};
   State.dayTransport[date].type = type;
+  Log.action('Transport type changed', { date, type });
   Storage.save();
   renderAll();
   drawRoute(State.selectedDayIndex); // redraws inter-city route (flight GCC vs driving)
@@ -2898,7 +3019,7 @@ function openAccEditModal(accId, isNew) {
   document.getElementById('ae-search-field').style.display = isNew ? '' : 'none';
   // Show delete only for user-created (non-bundled) accommodations
   document.getElementById('ae-delete-btn').style.display = acc.isUserCreated ? '' : 'none';
-  document.getElementById('acc-edit-modal').classList.remove('hidden');
+  openModal(document.getElementById('acc-edit-modal'));
 }
 
 function closeAccEditModal() {
@@ -2919,7 +3040,7 @@ function closeAccEditModal() {
     drawRoute(State.selectedDayIndex);
     renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   }
-  document.getElementById('acc-edit-modal').classList.add('hidden');
+  closeModal(document.getElementById('acc-edit-modal'));
 }
 
 function deleteAccommodation() {
@@ -2927,6 +3048,7 @@ function deleteAccommodation() {
   if (!accId) return;
   const acc = State.trip?.accommodations.find(a => a.id === accId);
   if (!acc?.isUserCreated) return;
+  Log.action('Accommodation deleted', { accId, name: acc.name });
   // Remove from trip
   State.trip.accommodations = State.trip.accommodations.filter(a => a.id !== accId);
   // Remove any day assignments pointing to it
@@ -2939,7 +3061,7 @@ function deleteAccommodation() {
   Storage.saveAccEdits(State.trip.id);
   Storage.saveUserAccs(State.trip.id);
   _pendingNewAccId = null;
-  document.getElementById('acc-edit-modal').classList.add('hidden');
+  closeModal(document.getElementById('acc-edit-modal'));
   clearAllRoutes();
   placeMarkers();
   renderAll();
@@ -3053,6 +3175,7 @@ function saveAccEdit() {
   }
   Storage.saveAccEdits(State.trip.id);
   Storage.saveUserAccs(State.trip.id);
+  Log.action('Accommodation updated', { accId, name: State.accEdits[accId]?.name, price: State.accEdits[accId]?.pricePerNight });
   _pendingNewAccId = null;
   closeAccEditModal();
   clearAllRoutes();
@@ -3180,12 +3303,12 @@ function openCustomMarkerModal(lat, lng) {
         <button class="modal-btn modal-btn-save" onclick="App.saveCustomMarker(${lat}, ${lng})">Add Place</button>
       </div>
     </div>`;
-  modal.classList.remove('hidden');
+  openModal(modal);
   setTimeout(() => document.getElementById('cm-name')?.focus(), 50);
 }
 
 function closeCustomMarkerModal() {
-  document.getElementById('custom-marker-modal')?.classList.add('hidden');
+  closeModal(document.getElementById('custom-marker-modal'));
   State.pendingMarkerLatLng = null;
 }
 
@@ -3296,6 +3419,7 @@ async function nominatimSearch(query, dayIndex) {
   const acc = getEffectiveAcc(day?.date);
   const { lat, lng } = acc ? getAccCoords(acc) : {};
   const delta = 1.2; // ~130 km radius
+  const t0 = Date.now();
   try {
     const params = new URLSearchParams({
       format: 'json', limit: '8', q: query, addressdetails: '1', extratags: '1',
@@ -3303,11 +3427,13 @@ async function nominatimSearch(query, dayIndex) {
     });
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`,
-      { signal: ctrl.signal, headers: { 'Accept-Language': 'en' } });
+    const url = `https://nominatim.openstreetmap.org/search?${params}`;
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'Accept-Language': 'en' } });
     clearTimeout(t);
-    return r.ok ? await r.json() : null;
-  } catch { return null; }
+    const data = r.ok ? await r.json() : null;
+    Log.api('Nominatim', url, r.status, Date.now() - t0, { query, results: data?.length });
+    return data;
+  } catch (e) { Log.warn('api', `Nominatim search failed: ${query}`, e.message); return null; }
 }
 
 function nominatimCategoryMap(type, cls) {
@@ -3423,6 +3549,7 @@ async function overpassQuery(lat, lng, radiusM) {
  way["historic"~"^(castle|ruins|monument|palace|archaeological_site)$"]["name"](around:${radiusM},${lat},${lng});
  node["natural"~"^(beach|cliff|peak|cave_entrance|hot_spring)$"]["name"](around:${radiusM},${lat},${lng});
 );out center body;`;
+  const t0 = Date.now();
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 15000);
@@ -3430,8 +3557,10 @@ async function overpassQuery(lat, lng, radiusM) {
       method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctrl.signal,
     });
     clearTimeout(t);
-    return r.ok ? (await r.json()).elements || [] : null;
-  } catch { return null; }
+    const data = r.ok ? (await r.json()).elements || [] : null;
+    Log.api('Overpass', 'overpass-api.de', r.status, Date.now() - t0, { radiusM, results: data?.length });
+    return data;
+  } catch (e) { Log.warn('api', `Overpass query failed (${radiusM}m radius)`, e.message); return null; }
 }
 
 function clearDiscoveryMarkers() {
@@ -3672,7 +3801,7 @@ function openPoiEditModal(poiId) {
     <div class="modal-panel" style="max-width:400px">
       <div class="modal-header">
         <span class="modal-title">✏️ Edit Place</span>
-        <button class="modal-close-btn" onclick="document.getElementById('poi-edit-modal').classList.add('hidden')">✕</button>
+        <button class="modal-close-btn" onclick="App.closePoiEditModal()">✕</button>
       </div>
       <div class="modal-body">
         <div class="settings-field">
@@ -3752,12 +3881,16 @@ function openPoiEditModal(poiId) {
       </div>
       <div class="modal-actions">
         <button class="modal-btn modal-btn-cancel"
-          onclick="document.getElementById('poi-edit-modal').classList.add('hidden')">Cancel</button>
-        <button class="modal-btn modal-btn-save" onclick="App.savePoiEdit('${poiId}')">Save</button>
+          onclick="App.closePoiEditModal()">Cancel</button>
+        <button class="modal-btn modal-btn-save" onclick="App.savePoiEdit('${esc(poiId)}')">Save</button>
       </div>
     </div>`;
-  modal.classList.remove('hidden');
+  openModal(modal);
   setTimeout(() => document.getElementById('pe-name')?.focus(), 50);
+}
+
+function closePoiEditModal() {
+  closeModal(document.getElementById('poi-edit-modal'));
 }
 
 function pePreviewIcon() {
@@ -3794,7 +3927,8 @@ function savePoiEdit(poiId) {
   if (['imported', 'custom', 'discovered'].includes(poi.source)) Storage.saveImported(State.trip.id);
   // Save edits for ALL POIs (including bundled trip POIs) to Firebase
   Storage.savePoiEdits(State.trip.id);
-  document.getElementById('poi-edit-modal')?.classList.add('hidden');
+  Log.action('POI updated', { id: poiId, name: poi.name, category: poi.category, cost: poi.costLabel, booked: poi.confirmedBooking });
+  closePoiEditModal();
   placeMarkers(); renderAll();
   renderDayMetricsUI(State.selectedDayIndex, State.lastRouteResult?.distKm || 0);
   showToast('Place updated');
@@ -4239,14 +4373,14 @@ function openNewTripForm() {
         </div>
       </div>
     </div>`;
-  modal.classList.remove('hidden');
+  openModal(modal);
   // Add first leg row automatically
   ntfAddLeg();
   document.getElementById('ntf-name')?.focus();
 }
 
 function closeNewTripForm() {
-  document.getElementById('new-trip-modal')?.classList.add('hidden');
+  closeModal(document.getElementById('new-trip-modal'));
 }
 
 function ntfAddLeg() {
@@ -4361,11 +4495,11 @@ function showTripSelector(trips) {
   newBtn.onclick = () => App.openNewTripForm();
   cards.appendChild(newBtn);
 
-  el.classList.remove('hidden');
+  openModal(el);
 }
 
 function closeTripSelector() {
-  document.getElementById('trip-selector')?.classList.add('hidden');
+  closeModal(document.getElementById('trip-selector'));
 }
 
 // ─── Trip Loading ──────────────────────────────────────────────
@@ -4373,7 +4507,7 @@ async function loadTrip(tripId) {
   const trip = tripRegistry.find(t => t.id === tripId);
   if (!trip) { console.error('Trip not found:', tripId); return; }
   State.trip = trip;
-  document.getElementById('trip-selector')?.classList.add('hidden');
+  closeModal(document.getElementById('trip-selector'));
 
   // Restore or initialize plan (async — reads from Firebase)
   const saved = await Storage.load(tripId);
@@ -4811,14 +4945,18 @@ async function generateShareLink() {
   const fullUrl = `${location.origin}${location.pathname}?share=${compressed}`;
 
   statusEl.textContent = '⏳ Shortening link…';
+  const t0 = Date.now();
   try {
-    const r = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(fullUrl)}`);
+    const shortenUrl = `https://is.gd/create.php?format=simple&url=${encodeURIComponent(fullUrl)}`;
+    const r = await fetch(shortenUrl);
+    Log.api('is.gd', shortenUrl, r.status, Date.now() - t0);
     if (!r.ok) throw new Error();
     const shortUrl = (await r.text()).trim();
     inputEl.value = shortUrl;
     statusEl.textContent = '✅ Ready — send this link to anyone';
     copyBtn.disabled = false;
-  } catch {
+  } catch (e) {
+    Log.warn('api', 'is.gd shortener failed', e.message);
     inputEl.value = fullUrl;
     statusEl.textContent = '⚠️ Shortener unavailable — copy the full link below';
     copyBtn.disabled = false;
@@ -4839,11 +4977,11 @@ function openShareModal() {
   if (!State.trip) return;
   const area = document.getElementById('share-link-area');
   if (area) area.style.display = 'none';
-  document.getElementById('share-modal')?.classList.remove('hidden');
+  openModal(document.getElementById('share-modal'));
 }
 
 function closeShareModal() {
-  document.getElementById('share-modal')?.classList.add('hidden');
+  closeModal(document.getElementById('share-modal'));
 }
 
 // ── Shared plan via URL ──────────────────────────────────────────
@@ -4980,6 +5118,7 @@ function injectHeaderButtons() {
 }
 
 // ─── Public API ────────────────────────────────────────────────
+window.Log = Log;
 window.App = {
   selectDay,
   openDetail,
@@ -5025,6 +5164,7 @@ window.App = {
   openPoiEditModal,
   pePreviewIcon,
   savePoiEdit,
+  closePoiEditModal,
   pickEmoji,
   toggleEmojiPicker,
   setDayAcc,
@@ -5111,7 +5251,7 @@ async function init() {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       closeDetail();
-      document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
+      document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => closeModal(m));
     }
   });
 

@@ -306,6 +306,7 @@ function createTestContext() {
     window.loadApiQuota = loadApiQuota;
     window.updateQuotaDisplay = updateQuotaDisplay;
     window.setMapStyle = setMapStyle;
+    window.Log = Log;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });

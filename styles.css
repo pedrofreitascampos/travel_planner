@@ -51,6 +51,13 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body.modal-open #app,
+body.modal-open #bottom-sheet,
+body.modal-open #map {
+  pointer-events: none;
+  touch-action: none;
+}
+
 /* ─── App Shell ──────────────────────────────────────────────── */
 #app {
   display: flex;
@@ -2275,6 +2282,58 @@ html, body {
 
   /* Day highlights stacked on very small screens */
   .day-highlights { flex-direction: column; }
+
+  /* ─── Touch targets: minimum 44px ──────────────────────── */
+  .btn-icon { min-width: 44px; min-height: 44px; }
+  .btn-move-day { min-width: 44px; min-height: 44px; width: auto; }
+  .drag-handle { min-width: 36px; min-height: 44px; display: flex; align-items: center; justify-content: center; padding: 8px 4px; }
+  .emoji-pick-btn { min-width: 40px; min-height: 40px; }
+  .cat-filter { min-height: 40px; }
+  .cat-check { width: 20px; height: 20px; }
+  .cat-filter input:checked ~ .cat-check::after { top: 0; left: 2px; font-size: 13px; }
+  .toggle-track { width: 40px; height: 24px; }
+  .toggle-track::after { width: 20px; height: 20px; }
+  .layer-toggle input:checked + .toggle-track::after { left: 18px; }
+  .layer-toggle { min-height: 40px; }
+  .route-mode-btn { min-height: 40px; padding: 8px; }
+  #sheet-handle { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+
+  /* ─── Tap feedback (:active states) ────────────────────── */
+  .poi-card:active { background: var(--color-accent-light); border-color: var(--color-accent); }
+  .btn-icon:active { opacity: 0.6; transform: scale(0.9); }
+  .btn-move-day:active { opacity: 0.6; }
+  .route-mode-btn:active { opacity: 0.7; }
+  .transport-type-btn:active { opacity: 0.7; }
+  .day-tab:active { opacity: 0.7; }
+  .discover-cat-filter:active { opacity: 0.7; }
+  .emoji-pick-btn:active { transform: scale(0.85); }
+  .cat-filter:active { opacity: 0.7; }
+  .toggle-label:active { opacity: 0.7; }
+  .modal-btn:active { opacity: 0.7; transform: scale(0.97); }
+  .acc-picker-select:active { border-color: var(--color-accent); }
+
+  /* ─── Overscroll containment ───────────────────────────── */
+  .day-tabs-host { overscroll-behavior: contain; }
+  .plan-content-host { overscroll-behavior: contain; }
+  #bottom-sheet-inner { overscroll-behavior: contain; }
+  #poi-detail { overscroll-behavior: contain; }
+  #layer-panel { overscroll-behavior: contain; }
+  .modal-panel { overscroll-behavior: contain; }
+
+  /* ─── Mobile text sizes (minimum readability) ──────────── */
+  .tab-label { font-size: 11px; }
+  .tab-date { font-size: 10px; }
+  .metric-section-title { font-size: 11px; }
+  .section-label { font-size: 11px; }
+  .badge { font-size: 11px; padding: 2px 7px; }
+  .poi-kids { font-size: 11px; }
+  .toggle-label { font-size: 13px; }
+  .cat-label { font-size: 13px; }
+  .discover-cat-filter { font-size: 13px; }
+  .discover-rating-filter { font-size: 13px; }
+
+  /* ─── Toast above bottom sheet ─────────────────────────── */
+  #toast-container { bottom: calc(env(safe-area-inset-bottom, 0px) + 280px); }
 }
 
 /* ═══════════════════════════════════════════════════════════════
