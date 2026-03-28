@@ -165,6 +165,7 @@ const Auth = {
     const settingsBtn = document.createElement('button');
     settingsBtn.id = 'btn-header-settings';
     settingsBtn.title = 'Settings';
+    settingsBtn.setAttribute('aria-label', 'Settings');
     settingsBtn.textContent = '⚙️';
     settingsBtn.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;';
     settingsBtn.onclick = () => App.openSettingsModal();
@@ -2888,12 +2889,12 @@ function switchDayTab(tabName) {
     // Load nearby if not already loaded
     const nearbyEl = document.querySelector('.nearby-discover-results');
     if (nearbyEl?.querySelector('.discover-loading')) {
-      discoverNearby(di);
+      discoverNearby(di).catch(e => Log.error('action', 'Discover nearby failed', e.message));
     }
     // Load along-route if not already loaded
     const routeEl = document.querySelector('.route-discover-results');
     if (routeEl?.querySelector('.discover-loading')) {
-      discoverAlongRoute(di);
+      discoverAlongRoute(di).catch(e => Log.error('action', 'Discover along route failed', e.message));
     }
   }
 }
@@ -3458,8 +3459,11 @@ function buildDiscoveredCardHtml(lat, lng, name, category, subtitle, dayIndex, o
   const cat = CATEGORIES[category] || CATEGORIES.monument;
   const key = `${lat.toFixed(6)},${lng.toFixed(6)},${Date.now()},${Math.random()}`;
   _discCache.set(key, { lat, lng, name, category, dayIndex, osmTags: osmTags || {} });
-  // Keep cache tidy
-  if (_discCache.size > 300) _discCache.delete(_discCache.keys().next().value);
+  // Keep cache bounded — purge oldest when oversized
+  if (_discCache.size > 300) {
+    const keys = [..._discCache.keys()];
+    for (let i = 0; i < keys.length - 200; i++) _discCache.delete(keys[i]);
+  }
 
   // Mini meta from OSM tags
   const t = osmTags || {};
@@ -3644,6 +3648,19 @@ async function discoverNearby(dayIndex, categoryFilter) {
   document.querySelectorAll('.nearby-discover-results').forEach(el => {
     el.innerHTML = '<div class="discover-loading">🔍 Searching…</div>';
   });
+  try { await _discoverNearbyImpl(dayIndex, categoryFilter); }
+  catch (e) {
+    Log.error('action', 'Discover nearby failed', e.message);
+    document.querySelectorAll('.nearby-discover-results').forEach(el => {
+      el.innerHTML = '<div class="discover-empty">Search failed. Try again.</div>';
+    });
+  }
+}
+
+async function _discoverNearbyImpl(dayIndex, categoryFilter) {
+  const day = getDay(dayIndex);
+  const acc = getEffectiveAcc(day?.date);
+  if (!acc) return;
   const radiusM = (State.settings.discoveryRadius || 10) * 1000;
   const { lat: aLat, lng: aLng } = getAccCoords(acc);
 
@@ -3697,6 +3714,18 @@ async function discoverAlongRoute(dayIndex) {
   document.querySelectorAll('.route-discover-results').forEach(el => {
     el.innerHTML = '<div class="discover-loading">🔍 Searching along route…</div>';
   });
+  try { await _discoverAlongRouteImpl(dayIndex); }
+  catch (e) {
+    Log.error('action', 'Discover along route failed', e.message);
+    document.querySelectorAll('.route-discover-results').forEach(el => {
+      el.innerHTML = '<div class="discover-empty">Search failed. Try again.</div>';
+    });
+  }
+}
+
+async function _discoverAlongRouteImpl(dayIndex) {
+  const day = getDay(dayIndex);
+  if (!day) return;
 
   // Sample points along the inter-city route: 3 for Google (fewer API calls), 7 for OSM
   const coords = State.lastInterCityResult?.geojson?.coordinates;
@@ -5086,6 +5115,7 @@ function injectHeaderButtons() {
   const btnPin = document.createElement('button');
   btnPin.id = 'btn-add-marker';
   btnPin.title = 'Drop a custom pin on the map';
+  btnPin.setAttribute('aria-label', 'Drop a custom pin on the map');
   btnPin.textContent = '📍';
   btnPin.onclick = () => State.customMarkerMode ? disableCustomMarkerMode() : enableCustomMarkerMode();
   btnPin.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;transition:all 0.15s;';
@@ -5093,6 +5123,7 @@ function injectHeaderButtons() {
   const btnImport = document.createElement('button');
   btnImport.id = 'btn-import';
   btnImport.title = 'Import places from Google Maps';
+  btnImport.setAttribute('aria-label', 'Import places');
   btnImport.textContent = '📥';
   btnImport.onclick = () => App.openImportModal();
   btnImport.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
@@ -5100,6 +5131,7 @@ function injectHeaderButtons() {
   const btnShare = document.createElement('button');
   btnShare.id = 'btn-share';
   btnShare.title = 'Share / export plan';
+  btnShare.setAttribute('aria-label', 'Share plan');
   btnShare.textContent = '🔗';
   btnShare.onclick = () => App.openShareModal();
   btnShare.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
@@ -5107,6 +5139,7 @@ function injectHeaderButtons() {
   const btnOverview = document.createElement('button');
   btnOverview.id = 'btn-trip-overview';
   btnOverview.title = 'Trip overview & metrics';
+  btnOverview.setAttribute('aria-label', 'Trip overview');
   btnOverview.textContent = '📊';
   btnOverview.onclick = () => App.openTripOverviewModal();
   btnOverview.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
