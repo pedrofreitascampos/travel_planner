@@ -2337,6 +2337,19 @@ body.modal-open #map {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   LANDSCAPE MOBILE (phone in landscape)
+═══════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) and (orientation: landscape) {
+  #bottom-sheet { max-height: 60dvh; }
+  #bottom-sheet.expanded { height: 55dvh; }
+  #poi-detail { height: 70dvh; }
+  .modal-panel { max-height: 80dvh; }
+  #toast-container { bottom: calc(env(safe-area-inset-bottom, 0px) + 160px); }
+  #app-header { --header-height: 40px; }
+  #app-header button { padding: 3px 6px !important; font-size: 13px !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
    DESKTOP LAYOUT  (≥ 768px)
 ═══════════════════════════════════════════════════════════════ */
 @media (min-width: 768px) {
@@ -2375,4 +2388,100 @@ body.modal-open #map {
 button:focus-visible, select:focus-visible, input:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DARK MODE
+═══════════════════════════════════════════════════════════════ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-header: #0f0f1a;
+    --color-accent: #e8956e;
+    --color-accent-hover: #d4805a;
+    --color-accent-light: #3a2a22;
+    --color-gold: #f0c040;
+    --color-gold-light: #3a3018;
+    --color-sidebar-bg: #1a1a2e;
+    --color-text: #e0e0e0;
+    --color-text-secondary: #999;
+    --color-text-light: #777;
+    --color-border: #333;
+    --color-border-dark: #444;
+    --color-card-bg: #22223a;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+  }
+
+  html, body { background: #111; }
+
+  /* Surfaces */
+  #sidebar { background: var(--color-sidebar-bg); }
+  #bottom-sheet { background: var(--color-sidebar-bg); }
+  #poi-detail { background: var(--color-sidebar-bg); }
+  .modal-panel { background: var(--color-sidebar-bg); color: var(--color-text); }
+  .modal-overlay { background: rgba(0,0,0,0.7); }
+  #layer-panel { background: var(--color-sidebar-bg); border-color: var(--color-border); }
+
+  /* Cards & inputs */
+  .poi-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .add-poi-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .transport-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .acc-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .drive-info { background: var(--color-card-bg); border-color: var(--color-border); }
+  .metric-card { background: var(--color-card-bg); }
+  .settings-input, .settings-select, select, input[type="text"], input[type="number"], textarea {
+    background: var(--color-card-bg); color: var(--color-text); border-color: var(--color-border);
+  }
+
+  /* Buttons */
+  .btn-detail { background: var(--color-card-bg); color: var(--color-text-secondary); border-color: var(--color-border); }
+  .btn-remove { background: #3a1a1a; color: #ef5350; }
+  .btn-add-poi { background: var(--color-card-bg); color: var(--color-accent); border-color: var(--color-border); }
+  .route-mode-btn { background: var(--color-card-bg); color: var(--color-text); border-color: var(--color-border); }
+  .transport-type-btn { background: var(--color-card-bg); color: var(--color-text); border-color: var(--color-border); }
+  .discover-load-btn { background: var(--color-card-bg); color: var(--color-text); border-color: var(--color-border); }
+
+  /* Badges */
+  .badge { background: var(--color-card-bg); }
+  .badge-cost { background: #1a3a1a; color: #66bb6a; }
+  .badge-cost.free { background: #1a2a3a; color: #64b5f6; }
+  .badge-duration { background: var(--color-card-bg); color: var(--color-text-secondary); border-color: var(--color-border); }
+  .badge-confirmed { background: var(--color-gold-light); color: #f0c040; }
+  .badge-warning { background: #3a3018; color: #ffa726; }
+  .badge-booking { background: #1a2a1a; color: #66bb6a; }
+
+  /* Text overrides for hardcoded colors */
+  .acc-name, .acc-city { color: #7faad4; }
+  .drive-info-label { color: #7faad4; }
+  .section-label { color: var(--color-text-secondary); }
+  .poi-card .poi-name { color: var(--color-text); }
+
+  /* Suggestion & analysis cards */
+  .suggestion-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .suggestion-card.positive { border-left-color: #27ae60; background: #1a2a1a; color: #a5d6a7; }
+  .suggestion-card.neutral { border-left-color: #1976d2; background: #1a2030; color: #90caf9; }
+  .suggestion-card.improvement { border-left-color: #f39c12; background: #2a2010; color: #ffe082; }
+
+  /* Discover */
+  .discover-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .discover-empty, .discover-loading { color: var(--color-text-light); }
+
+  /* Handle bar */
+  .handle-bar { background: #555; }
+
+  /* Auth gate */
+  #auth-gate { background: #0f0f1a; }
+  .auth-card { background: var(--color-sidebar-bg); }
+
+  /* Toast */
+  .toast { background: #2a2a3e; color: var(--color-text); box-shadow: var(--shadow-lg); }
+
+  /* Trip selector */
+  #trip-selector { background: rgba(0,0,0,0.85); }
+  .trip-card { background: var(--color-card-bg); border-color: var(--color-border); color: var(--color-text); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar-track { background: var(--color-sidebar-bg); }
+  ::-webkit-scrollbar-thumb { background: #444; }
 }
