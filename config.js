@@ -1,9 +1,9 @@
-// This file is gitignored — never commit secrets to the repo.
-// Copy config.example.js to config.js and fill in your values.
+// Firebase client config — public by design (security enforced by Firebase Rules).
+// Do not add server-side secrets here.
 
 window.__APP_CONFIG = {
   firebase: {
-    apiKey: "AIzaSyAvWjExtINNkJJNfTP920kf84MgT4rvjOc",
+    apiKey: "AIzaSyA9GhGb1I03FRoWsE5-Ly5WZiUIfw3TXoo",
     authDomain: "tripcraft-e0389.firebaseapp.com",
     databaseURL: "https://tripcraft-e0389-default-rtdb.europe-west1.firebasedatabase.app",
     projectId: "tripcraft-e0389",
