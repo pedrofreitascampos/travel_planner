@@ -450,6 +450,53 @@ test('buildSharePayload: includes poiTransport', () => {
   assert.strictEqual(payload.poiTransport['poi-1'], 'driving');
 });
 
+// ─── Copy day POIs ───────────────────────────────────────────
+
+test('copyDayPois: copies POIs to target day', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  // Day 0 has poi-1 and poi-2; Day 2 has poi-3
+  assert.strictEqual(ctx.State.plan['2026-06-03'].length, 1);
+  ctx.copyDayPois(0, '2026-06-03');
+  assert.ok(ctx.State.plan['2026-06-03'].includes('poi-1'));
+  assert.ok(ctx.State.plan['2026-06-03'].includes('poi-2'));
+  assert.ok(ctx.State.plan['2026-06-03'].includes('poi-3'), 'existing POIs preserved');
+});
+
+test('copyDayPois: does not duplicate existing POIs', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.plan['2026-06-03'] = ['poi-1'];
+  ctx.copyDayPois(0, '2026-06-03');
+  const count = ctx.State.plan['2026-06-03'].filter(id => id === 'poi-1').length;
+  assert.strictEqual(count, 1, 'poi-1 should not be duplicated');
+});
+
+// ─── Google Maps link resolver ───────────────────────────────
+
+test('resolveGoogleMapsLink: parses full place URL', async () => {
+  const ctx = createTestContext();
+  const result = await ctx.resolveGoogleMapsLink('https://www.google.com/maps/place/Belem+Tower/@38.6916,-9.216,17z');
+  assert.ok(result, 'should return a result');
+  assert.strictEqual(result.name, 'Belem Tower');
+  assert.strictEqual(result.lat, 38.6916);
+  assert.strictEqual(result.lng, -9.216);
+});
+
+test('resolveGoogleMapsLink: parses query URL with coords', async () => {
+  const ctx = createTestContext();
+  const result = await ctx.resolveGoogleMapsLink('https://maps.google.com/?q=38.6916,-9.216');
+  assert.ok(result);
+  assert.strictEqual(result.lat, 38.6916);
+  assert.strictEqual(result.lng, -9.216);
+});
+
+test('resolveGoogleMapsLink: returns null for non-Maps URL', async () => {
+  const ctx = createTestContext();
+  const result = await ctx.resolveGoogleMapsLink('https://example.com');
+  assert.strictEqual(result, null);
+});
+
 test('addPoi: adds POI to current day plan', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);

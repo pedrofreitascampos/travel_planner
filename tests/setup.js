@@ -319,6 +319,9 @@ function createTestContext() {
     window.buildOikumeneExport = buildOikumeneExport;
     window.getPoiTransportMode = getPoiTransportMode;
     window.togglePoiTransport = togglePoiTransport;
+    window.copyDayPois = copyDayPois;
+    window.resolveGoogleMapsLink = resolveGoogleMapsLink;
+    window.addFromGoogleLink = addFromGoogleLink;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });

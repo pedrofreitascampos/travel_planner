@@ -1385,7 +1385,13 @@ function makePOIIcon(poi, dayIndex) {
   const ring = poi.confirmedBooking
     ? `border:3px solid #f0c040;box-shadow:0 0 0 2px rgba(240,192,64,0.5),0 2px 6px rgba(0,0,0,0.3);`
     : 'border:2.5px solid rgba(255,255,255,0.9);box-shadow:0 2px 6px rgba(0,0,0,0.25);';
-  const html = `<div style="width:34px;height:34px;border-radius:50%;background:${color};${ring}display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1;">${cat.icon}</div>`;
+  const lockBadge = poi.confirmedBooking
+    ? `<div style="position:absolute;top:-4px;right:-4px;background:#f0c040;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:8px;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,0.3);">🔒</div>`
+    : '';
+  const timeBadge = poi.confirmedBooking && poi.bookingTime
+    ? `<div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:#f0c040;color:#5a4200;font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.2);">${esc(poi.bookingTime)}</div>`
+    : '';
+  const html = `<div style="position:relative;width:34px;height:34px;"><div style="width:34px;height:34px;border-radius:50%;background:${color};${ring}display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1;">${cat.icon}</div>${lockBadge}${timeBadge}</div>`;
   return L.divIcon({ html, className: '', iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -18] });
 }
 
@@ -2170,6 +2176,12 @@ function renderDayPlanContent(dayIndex) {
         ${poiCardsHtml}
       </div>
       ${arriveCardHtml}
+      ${plan.length > 0 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 4px;">
+        <select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;" onchange="App.copyDayPois(${dayIndex}, this.value); this.selectedIndex=0;" title="Copy all POIs to another day">
+          <option value="">📋 Copy day →</option>
+          ${State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('')}
+        </select>
+      </div>` : ''}
       <div class="discover-search-wrap" style="margin-top:8px;">
         <input class="poi-search-input" type="text" placeholder="🔍 Add a place…"
           oninput="App.searchPois(this, ${dayIndex})">
@@ -3314,6 +3326,62 @@ function setDayRouteMode(date, mode) {
   drawRoute(State.selectedDayIndex);
 }
 
+function copyDayPois(fromDayIndex, toDate) {
+  if (!toDate || !State.trip) return;
+  const fromDay = getDay(fromDayIndex);
+  if (!fromDay) return;
+  const fromPois = State.plan[fromDay.date] || [];
+  if (fromPois.length === 0) return;
+  if (!State.plan[toDate]) State.plan[toDate] = [];
+  let copied = 0;
+  fromPois.forEach(id => {
+    if (!State.plan[toDate].includes(id)) {
+      State.plan[toDate].push(id);
+      copied++;
+    }
+  });
+  if (copied === 0) { showToast('All POIs already on that day'); return; }
+  Storage.save();
+  Log.action('Day POIs copied', { from: fromDay.date, to: toDate, count: copied });
+  showToast(`Copied ${copied} POI${copied !== 1 ? 's' : ''} to ${formatShortDate(toDate)}`);
+}
+
+function addFromGoogleLink(id, name, lat, lng, dayIndex) {
+  if (!State.trip) return;
+  const nearestAcc = findNearestDestination(lat, lng);
+  const availableDays = nearestAcc ? nearestAcc.days : State.trip.days.map(d => d.date);
+  const poi = {
+    id, name, lat, lng,
+    category: 'monument',
+    source: 'imported',
+    destination: nearestAcc ? nearestAcc.location : 'Unknown',
+    description: 'Added from Google Maps link',
+    rating: null, ratingCount: 0,
+    cost: 0, costLabel: 'Free', costAmount: 0,
+    duration: 1, energyCost: 2,
+    kidsRating: 3, kidsFriendly: 3,
+    gmapsUrl: `https://maps.google.com/?q=${lat},${lng}`,
+    bookAhead: false, confirmedBooking: false,
+    tags: ['imported'], openingHours: 'Check locally',
+    availableDays, notes: '',
+  };
+  State.trip.pois.push(poi);
+  State.importedPois.push(poi);
+  Storage.saveImported(State.trip.id);
+  // Add to current day plan
+  const day = getDay(dayIndex);
+  if (day && availableDays.includes(day.date)) {
+    if (!State.plan[day.date]) State.plan[day.date] = [];
+    State.plan[day.date].push(id);
+    Storage.save();
+  }
+  Log.action('POI added from Google link', { id, name, lat, lng });
+  placeMarkers();
+  renderDayPlanContent(dayIndex);
+  drawRoute(dayIndex);
+  showToast(`Added "${name}"`);
+}
+
 function togglePoiTransport(poiId) {
   const current = State.poiTransport[poiId] || 'foot';
   State.poiTransport[poiId] = current === 'foot' ? 'driving' : 'foot';
@@ -3781,6 +3849,32 @@ function saveCustomMarker(lat, lng) {
 
 let _searchTimer = null;
 
+async function resolveGoogleMapsLink(url) {
+  // Extract coords from various Google Maps URL formats
+  // Full: https://www.google.com/maps/place/NAME/@LAT,LNG,...
+  const placeMatch = url.match(/\/maps\/place\/([^/@]+)\/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (placeMatch) return { name: decodeURIComponent(placeMatch[1]).replace(/\+/g, ' '), lat: parseFloat(placeMatch[2]), lng: parseFloat(placeMatch[3]) };
+  // Query: https://maps.google.com/?q=LAT,LNG or ?q=Name
+  const qMatch = url.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (qMatch) return { name: 'Dropped Pin', lat: parseFloat(qMatch[1]), lng: parseFloat(qMatch[2]) };
+  // Data param: !3d=LAT!4d=LNG
+  const dataMatch = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
+  if (dataMatch) return { name: 'Google Maps Pin', lat: parseFloat(dataMatch[1]), lng: parseFloat(dataMatch[2]) };
+  // Short link: https://maps.app.goo.gl/XXXXX — resolve via redirect
+  if (url.includes('goo.gl/') || url.includes('maps.app.goo.gl/')) {
+    try {
+      const t0 = Date.now();
+      const r = await fetch(url, { redirect: 'follow' });
+      Log.api('Google Maps resolve', url, r.status, Date.now() - t0);
+      const resolved = r.url || '';
+      if (resolved) return resolveGoogleMapsLink(resolved);
+    } catch (e) {
+      Log.warn('api', 'Failed to resolve Google Maps short link', e.message);
+    }
+  }
+  return null;
+}
+
 function searchPois(inputEl, dayIndex) {
   const q = inputEl.value.trim();
   const list = inputEl.closest('.day-tab-panel') || inputEl.closest('.add-more-list');
@@ -3788,6 +3882,34 @@ function searchPois(inputEl, dayIndex) {
   if (!resultsEl) return;
   clearTimeout(_searchTimer);
   if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+
+  // Detect Google Maps URLs
+  if (q.match(/^https?:\/\/(www\.)?(google\.\w+\/maps|maps\.google|maps\.app\.goo\.gl|goo\.gl)/i)) {
+    resultsEl.innerHTML = '<div class="discover-loading">🔗 Resolving link…</div>';
+    resolveGoogleMapsLink(q).then(result => {
+      if (!result || !result.lat || !result.lng) {
+        resultsEl.innerHTML = '<div class="discover-empty">Could not extract location from link</div>';
+        return;
+      }
+      const day = getDay(dayIndex);
+      const nearestAcc = findNearestDestination(result.lat, result.lng);
+      const availableDays = nearestAcc ? nearestAcc.days : (State.trip.days.map(d => d.date));
+      const id = `imported-${slugify(result.name)}-${Math.floor(result.lat * 1000)}`;
+      // Check if already exists
+      if (State.trip.pois.find(p => p.id === id)) {
+        resultsEl.innerHTML = `<div class="discover-empty">"${esc(result.name)}" is already in the trip</div>`;
+        return;
+      }
+      resultsEl.innerHTML = `
+        <div class="search-result-card" style="padding:8px;border:1px solid var(--color-border);border-radius:6px;margin:4px 0;">
+          <div style="font-weight:600;font-size:12px;">${esc(result.name)}</div>
+          <div style="font-size:11px;color:var(--color-text-secondary);">${result.lat.toFixed(5)}, ${result.lng.toFixed(5)}</div>
+          <button class="modal-btn modal-btn-save" style="margin-top:6px;font-size:11px;padding:4px 12px;" onclick="App.addFromGoogleLink('${esc(id)}', '${esc(result.name)}', ${result.lat}, ${result.lng}, ${dayIndex})">Add to trip</button>
+        </div>`;
+    });
+    return;
+  }
+
   resultsEl.innerHTML = '<div class="discover-loading">🔍 Searching…</div>';
   _searchTimer = setTimeout(async () => {
     let results;
@@ -5722,6 +5844,8 @@ window.App = {
   saveCustomMarker,
   searchPois,
   addDiscoveredResult,
+  addFromGoogleLink,
+  copyDayPois,
   discoverNearby,
   discoverAlongRoute,
   openPoiEditModal,
