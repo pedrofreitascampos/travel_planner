@@ -4673,20 +4673,6 @@ function openPoiEditModal(poiId) {
             <label class="settings-label">Category → Icon</label>
             <select id="pe-category" class="settings-input" onchange="App.pePreviewIcon()">${catOpts}</select>
           </div>
-          <div class="settings-field" style="width:76px">
-            <label class="settings-label">Custom emoji</label>
-            <input id="pe-emoji" type="text" class="settings-input"
-              value="${esc(poi.emoji || '')}" placeholder="none"
-              style="text-align:center;font-size:18px;" maxlength="4"
-              oninput="App.pePreviewIcon()"
-              onclick="App.toggleEmojiPicker('pe-emoji-picker')">
-          </div>
-        </div>
-        <div id="pe-emoji-picker" class="hidden">
-          ${buildEmojiPickerHtml('pe-emoji', 'pe-emoji-grid')}
-          <div id="pe-icon-preview" style="font-size:30px;padding:4px 6px;line-height:1;align-self:flex-end">
-            ${currentIcon}
-          </div>
         </div>
         <div class="settings-row-2">
           <div class="settings-field">
@@ -5218,8 +5204,8 @@ function openNewTripForm() {
       <div class="new-trip-form" id="ntf">
         <div class="ntf-row">
           <div class="ntf-field ntf-field-grow">
-            <label>Trip name</label>
-            <input id="ntf-name" type="text" placeholder="e.g. Lisbon Weekend" autocomplete="off">
+            <label>Trip name <span class="ntf-required">*</span></label>
+            <input id="ntf-name" type="text" placeholder="e.g. Seville &amp; Portugal" autocomplete="off" required>
           </div>
           <div class="ntf-field ntf-field-narrow">
             <label>Icon</label>
@@ -5233,22 +5219,26 @@ function openNewTripForm() {
 
         <div class="ntf-row">
           <div class="ntf-field ntf-field-grow">
-            <label>Home city (origin &amp; return)</label>
+            <label>Home city <span style="font-weight:400;color:var(--color-text-secondary);font-size:10px;">(departure &amp; return point)</span></label>
             <input id="ntf-home" type="text" placeholder="e.g. Lisbon" autocomplete="off">
           </div>
         </div>
 
-        <div class="ntf-section-label">Legs (accommodations) <button class="ntf-add-dest" onclick="App.ntfAddLeg()">＋ Add leg</button></div>
+        <div class="ntf-section-label">
+          Destinations
+          <span style="font-weight:400;color:var(--color-text-secondary);font-size:10px;">where you'll stay</span>
+          <button class="ntf-add-dest" onclick="App.ntfAddLeg()">＋ Add destination</button>
+        </div>
         <div id="ntf-legs"></div>
+        <div id="ntf-validation-msg" class="ntf-validation-msg"></div>
 
         <div class="ntf-actions">
           <button class="ntf-cancel" onclick="App.closeNewTripForm()">Cancel</button>
-          <button class="ntf-create" onclick="App.ntfSubmit()">Create Trip →</button>
+          <button class="ntf-create" id="ntf-create-btn" onclick="App.ntfSubmit()">Create Trip →</button>
         </div>
       </div>
     </div>`;
   openModal(modal);
-  // Add first leg row automatically
   ntfAddLeg();
   document.getElementById('ntf-name')?.focus();
 }
@@ -5261,7 +5251,6 @@ function ntfAddLeg() {
   const container = document.getElementById('ntf-legs');
   if (!container) return;
   const idx = container.children.length;
-  // Auto-populate check-in from previous leg's check-out
   let defaultCheckin = '';
   if (idx > 0) {
     const prevRow = container.children[idx - 1];
@@ -5271,38 +5260,71 @@ function ntfAddLeg() {
   const row = document.createElement('div');
   row.className = 'ntf-leg-row';
   row.innerHTML = `
+    <div class="ntf-leg-number">${idx + 1}</div>
     <div class="ntf-leg-fields">
       <div class="ntf-leg-main">
-        <input class="ntf-leg-acc" type="text" placeholder="Accommodation name (optional)" autocomplete="off">
-        <input class="ntf-leg-city" type="text" placeholder="City / location" autocomplete="off">
+        <input class="ntf-leg-city" type="text" placeholder="City / destination *" autocomplete="off" required>
+        <input class="ntf-leg-acc" type="text" placeholder="Hotel name (optional)" autocomplete="off">
       </div>
       <div class="ntf-leg-dates">
-        <label>Check-in</label>
-        <input class="ntf-leg-checkin" type="date" value="${defaultCheckin}">
-        <label>Check-out</label>
-        <input class="ntf-leg-checkout" type="date">
+        <div class="ntf-date-field">
+          <label>Arrive</label>
+          <input class="ntf-leg-checkin" type="date" value="${defaultCheckin}" required>
+        </div>
+        <div class="ntf-date-field">
+          <label>Depart</label>
+          <input class="ntf-leg-checkout" type="date" required>
+        </div>
       </div>
     </div>
-    ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-leg-row').remove()" title="Remove">×</button>` : ''}`;
+    ${idx > 0 ? `<button class="ntf-dest-remove" onclick="this.closest('.ntf-leg-row').remove(); App.ntfReindex()" title="Remove destination">×</button>` : ''}`;
   container.appendChild(row);
+  // Focus the city input of the new leg
+  row.querySelector('.ntf-leg-city')?.focus();
+}
+
+function ntfReindex() {
+  document.querySelectorAll('#ntf-legs .ntf-leg-row').forEach((row, i) => {
+    const num = row.querySelector('.ntf-leg-number');
+    if (num) num.textContent = i + 1;
+  });
 }
 
 async function ntfSubmit() {
-  const name = document.getElementById('ntf-name')?.value.trim();
-  if (!name) { showToast('Please enter a trip name'); return; }
+  const nameInput = document.getElementById('ntf-name');
+  const name = nameInput?.value.trim();
+  const msgEl = document.getElementById('ntf-validation-msg');
+  const setError = (msg, el) => {
+    if (msgEl) { msgEl.textContent = msg; msgEl.style.display = 'block'; }
+    if (el) { el.style.borderColor = '#e74c3c'; el.focus(); }
+  };
+  const clearError = () => { if (msgEl) msgEl.style.display = 'none'; };
+  clearError();
+  // Reset borders
+  document.querySelectorAll('#ntf .ntf-leg-city, #ntf .ntf-leg-checkin, #ntf .ntf-leg-checkout').forEach(el => { el.style.borderColor = ''; });
+  if (nameInput) nameInput.style.borderColor = '';
+
+  if (!name) { setError('Please enter a trip name', nameInput); return; }
 
   const rows = document.querySelectorAll('#ntf-legs .ntf-leg-row');
-  if (!rows.length) { showToast('Add at least one leg'); return; }
+  if (!rows.length) { setError('Add at least one destination'); return; }
 
   const legs = [];
   let valid = true;
+  let errorField = null;
   rows.forEach(row => {
+    if (!valid) return;
     const accName  = row.querySelector('.ntf-leg-acc')?.value.trim() || '';
-    const city     = row.querySelector('.ntf-leg-city')?.value.trim();
-    const dateFrom = row.querySelector('.ntf-leg-checkin')?.value;
-    const dateTo   = row.querySelector('.ntf-leg-checkout')?.value;
-    if (!city || !dateFrom || !dateTo) { valid = false; return; }
-    if (dateTo < dateFrom) { valid = false; return; }
+    const cityEl   = row.querySelector('.ntf-leg-city');
+    const checkinEl = row.querySelector('.ntf-leg-checkin');
+    const checkoutEl = row.querySelector('.ntf-leg-checkout');
+    const city     = cityEl?.value.trim();
+    const dateFrom = checkinEl?.value;
+    const dateTo   = checkoutEl?.value;
+    if (!city) { valid = false; errorField = cityEl; setError('Enter a city for each destination', cityEl); return; }
+    if (!dateFrom) { valid = false; errorField = checkinEl; setError('Set arrival date', checkinEl); return; }
+    if (!dateTo) { valid = false; errorField = checkoutEl; setError('Set departure date', checkoutEl); return; }
+    if (dateTo < dateFrom) { valid = false; errorField = checkoutEl; setError('Departure must be on or after arrival', checkoutEl); return; }
     legs.push({ accName, city, name: city, country: '', emoji: '📍', dateFrom, dateTo });
   });
 
@@ -6159,6 +6181,7 @@ window.App = {
   openNewTripForm,
   closeNewTripForm,
   ntfAddLeg,
+  ntfReindex,
   ntfSubmit,
   enableCustomMarkerMode,
   disableCustomMarkerMode,

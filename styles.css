@@ -1449,8 +1449,22 @@ body.modal-open #map {
   margin-bottom: 8px; background: var(--color-surface, #f9f9f9);
   padding: 10px 12px; border-radius: var(--radius-md);
   border: 1.5px solid var(--color-border);
-  border-bottom: 1.5px solid var(--color-border);
 }
+.ntf-leg-number {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--color-accent, #e07b54); color: white;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 4px;
+}
+.ntf-required { color: #e74c3c; }
+.ntf-validation-msg {
+  display: none; color: #e74c3c; font-size: 12px;
+  padding: 6px 8px; background: #fff5f5;
+  border: 1px solid #fecaca; border-radius: 6px;
+  margin-top: 4px;
+}
+.ntf-date-field { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 100px; }
 .ntf-leg-fields {
   flex: 1; display: flex; flex-direction: column; gap: 8px;
 }
