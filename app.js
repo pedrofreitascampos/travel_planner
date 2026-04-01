@@ -73,23 +73,6 @@ const Auth = {
   user: null, // { uid, name, email, picture }
 
   init() {
-    // Process redirect result (from signInWithRedirect) — errors surface here
-    firebaseAuth.getRedirectResult().catch(e => {
-      Log.error('auth', 'Redirect sign-in failed', { code: e.code, message: e.message });
-      const msgs = {
-        'auth/unauthorized-domain': `This domain is not authorized for sign-in.\nAdd it to Firebase Console → Authentication → Authorized domains.`,
-        'auth/operation-not-allowed': 'Google sign-in is not enabled.\nEnable it in Firebase Console → Authentication → Sign-in method.',
-      };
-      const msg = msgs[e.code] || `Sign-in failed (${e.code || 'unknown'}):\n${e.message}`;
-      let errEl = document.getElementById('auth-error-msg');
-      if (!errEl) {
-        errEl = document.createElement('div');
-        errEl.id = 'auth-error-msg';
-        errEl.style.cssText = 'color:#f87171;font-size:13px;margin-top:12px;text-align:center;white-space:pre-line;max-width:340px;';
-        document.getElementById('g-signin-btn')?.after(errEl);
-      }
-      errEl.textContent = msg;
-    });
     return new Promise(resolve => {
       firebaseAuth.onAuthStateChanged(user => {
         if (user) {
@@ -133,14 +116,15 @@ const Auth = {
   async signIn() {
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      // Use redirect instead of popup — popup fails when browsers block
-      // third-party cookies (firebaseapp.com ↔ github.io).
-      await firebaseAuth.signInWithRedirect(provider);
+      await firebaseAuth.signInWithPopup(provider);
+      // onAuthStateChanged will handle the rest
     } catch (e) {
+      if (e.code === 'auth/popup-closed-by-user') return;
       Log.error('auth', 'Sign-in failed', { code: e.code, message: e.message });
       const msgs = {
         'auth/unauthorized-domain': `This domain is not authorized for sign-in.\nAdd it to Firebase Console → Authentication → Authorized domains.`,
         'auth/operation-not-allowed': 'Google sign-in is not enabled.\nEnable it in Firebase Console → Authentication → Sign-in method.',
+        'auth/popup-blocked': 'Pop-up was blocked by the browser.\nAllow pop-ups for this site and try again.',
         'auth/internal-error': `Sign-in failed: ${e.message}`,
       };
       const msg = msgs[e.code] || `Sign-in failed (${e.code || 'unknown'}):\n${e.message}`;
