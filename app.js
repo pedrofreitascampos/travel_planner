@@ -5704,12 +5704,19 @@ window.App = {
 
 // ─── Initialization ────────────────────────────────────────────
 let _appBooted = false;
+let _initRunning = false;
 
 async function init() {
+  // Guard against re-entrant calls (onAuthStateChanged can fire multiple
+  // times during redirect sign-in flow)
+  if (_initRunning) return;
+  _initRunning = true;
+
+  try {
   // Auth gate — wait for Firebase auth state
   if (!Auth.user) {
     const signedIn = await Auth.init();
-    if (!signedIn) return; // shows sign-in gate; onAuthStateChanged will re-trigger
+    if (!signedIn) { _initRunning = false; return; } // shows sign-in gate; onAuthStateChanged will re-trigger
   }
   // Ensure app is visible
   document.getElementById('auth-gate').style.display = 'none';
@@ -5783,6 +5790,7 @@ async function init() {
   } else {
     showTripSelector(tripRegistry._arr);
   }
+  } finally { _initRunning = false; }
 }
 
 // Boot when DOM is ready
