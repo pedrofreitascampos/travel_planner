@@ -2155,7 +2155,7 @@ function renderDayPlanContent(dayIndex) {
   const shortlistIds = State.shortlist[day.date] || [];
   const shortlistHtml = shortlistIds.length > 0 ? `
     <div class="shortlist-section">
-      <div class="shortlist-header">📌 Shortlist <span class="shortlist-count">${shortlistIds.length}</span></div>
+      <div class="shortlist-header">📍 POIs <span class="shortlist-count">${shortlistIds.length}</span></div>
       <div class="shortlist-list">${shortlistIds.map(id => buildShortlistCardHtml(id)).join('')}</div>
     </div>` : '';
 
@@ -2223,7 +2223,7 @@ function renderDayPlanContent(dayIndex) {
 
       <div class="discover-group">
         <div class="discover-group-label">
-          📍 Near accommodation ·
+          📍 Nearby ·
           <select class="discover-cat-filter" onchange="App.discoverNearby(${dayIndex}, this.value)">
             <option value="all">All types</option>
             <option value="food">🍽️ Restaurants</option>
@@ -2288,6 +2288,12 @@ function renderDayPlanContent(dayIndex) {
     if (poiList) poiList.dataset.dayIndex = dayIndex;
     initDragDrop(poiList);
     initTouchDrag(poiList);
+    // Init drag/drop on shortlist section too
+    const shortlistList = el.querySelector('.shortlist-list');
+    if (shortlistList) {
+      initDragDrop(shortlistList);
+      initTouchDrag(shortlistList);
+    }
     // Staggered entrance animation for POI cards
     el.querySelectorAll('.poi-card, .add-poi-card').forEach((card, i) => {
       card.classList.add('card-enter');
@@ -2375,7 +2381,8 @@ function buildShortlistCardHtml(poiId) {
   if (!poi) return '';
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
   const icon = poi.emoji || cat.icon;
-  return `<div class="shortlist-card">
+  return `<div class="shortlist-card" data-poi-id="${poiId}" draggable="true">
+    <div class="drag-handle" title="Drag to tour">⠿</div>
     <div class="shortlist-icon">${icon}</div>
     <div class="shortlist-info">
       <div class="shortlist-name">${esc(poi.name)}</div>
@@ -2408,39 +2415,58 @@ async function loadThumbsForDay(dayIndex) {
 
 // ─── Drag and Drop (Desktop HTML5) ─────────────────────────────
 // Uses event delegation on the list element — attach once, works for any cards.
+let _dragSrcId = null;
+let _dragSrcSection = null; // 'tour' | 'shortlist'
+
 function initDragDrop(listEl) {
   if (!listEl || listEl._dragBound) return;
   listEl._dragBound = true;
-  let srcId = null;
 
   listEl.addEventListener('dragstart', e => {
-    const card = e.target.closest('.poi-card[draggable]');
+    const card = e.target.closest('[draggable][data-poi-id]');
     if (!card) return;
-    srcId = card.dataset.poiId;
+    _dragSrcId = card.dataset.poiId;
+    _dragSrcSection = card.closest('.shortlist-list') ? 'shortlist' : 'tour';
     card.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
   });
   listEl.addEventListener('dragend', e => {
-    const card = e.target.closest('.poi-card');
+    const card = e.target.closest('[data-poi-id]');
     if (card) card.classList.remove('dragging');
     listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    _dragSrcId = null;
+    _dragSrcSection = null;
   });
   listEl.addEventListener('dragover', e => {
     e.preventDefault();
     listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-    const card = e.target.closest('.poi-card');
+    const card = e.target.closest('[data-poi-id]');
     if (card) card.classList.add('drag-over');
   });
   listEl.addEventListener('dragleave', e => {
-    const card = e.target.closest('.poi-card');
+    const card = e.target.closest('[data-poi-id]');
     if (card) card.classList.remove('drag-over');
   });
   listEl.addEventListener('drop', e => {
     e.preventDefault();
-    const card = e.target.closest('.poi-card');
-    const tgtId = card?.dataset.poiId;
-    if (!srcId || !tgtId || srcId === tgtId) return;
-    reorderPlan(parseInt(listEl.dataset.dayIndex), srcId, tgtId);
+    if (!_dragSrcId) return;
+    // Determine drop target: check both the list itself and if we dropped on a card in the other section
+    const dropCard = e.target.closest('[data-poi-id]');
+    const dropList = dropCard?.closest('.shortlist-list') || dropCard?.closest('.poi-list') || listEl;
+    const dropSection = dropList.classList.contains('shortlist-list') ? 'shortlist' : 'tour';
+
+    if (_dragSrcSection === 'tour' && dropSection === 'tour') {
+      const tgtId = dropCard?.dataset.poiId;
+      if (tgtId && _dragSrcId !== tgtId) {
+        reorderPlan(State.selectedDayIndex, _dragSrcId, tgtId);
+      }
+    } else if (_dragSrcSection === 'shortlist' && dropSection === 'tour') {
+      promoteFromShortlist(_dragSrcId);
+    } else if (_dragSrcSection === 'tour' && dropSection === 'shortlist') {
+      addToShortlist(_dragSrcId);
+    }
+    _dragSrcId = null;
+    _dragSrcSection = null;
   });
 }
 
@@ -2455,12 +2481,15 @@ function initTouchDrag(listEl) {
   let origCard = null;
   let lastY = 0;
 
+  let srcSection = null;
+
   listEl.addEventListener('touchstart', e => {
     const handle = e.target.closest('.drag-handle');
     if (!handle) return;
-    origCard = handle.closest('.poi-card');
+    origCard = handle.closest('[draggable][data-poi-id]');
     if (!origCard) return;
     srcId = origCard.dataset.poiId;
+    srcSection = origCard.closest('.shortlist-list') ? 'shortlist' : 'tour';
     lastY = e.touches[0].clientY;
     origCard.style.opacity = '0.4';
 
@@ -2485,8 +2514,11 @@ function initTouchDrag(listEl) {
     ghost.style.visibility = 'hidden';
     const underEl = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
     ghost.style.visibility = '';
-    listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-    const tgtCard = underEl?.closest('.poi-card');
+    // Clear drag-over from all containers (tour + shortlist)
+    const panel = listEl.closest('.day-tab-panel') || listEl.closest('.plan-content-host');
+    if (panel) panel.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    else listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    const tgtCard = underEl?.closest('[data-poi-id]');
     if (tgtCard && tgtCard !== origCard) tgtCard.classList.add('drag-over');
   }, { passive: false });
 
@@ -2498,12 +2530,23 @@ function initTouchDrag(listEl) {
     ghost = null;
     const touch = e.changedTouches[0];
     const underEl = document.elementFromPoint(touch.clientX, touch.clientY);
-    listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-    const tgtCard = underEl?.closest('.poi-card');
-    if (tgtCard && srcId && tgtCard.dataset.poiId !== srcId) {
-      reorderPlan(parseInt(listEl.dataset.dayIndex), srcId, tgtCard.dataset.poiId);
+    const panel = listEl.closest('.day-tab-panel') || listEl.closest('.plan-content-host');
+    if (panel) panel.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    else listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+
+    const tgtCard = underEl?.closest('[data-poi-id]');
+    const dropSection = tgtCard?.closest('.shortlist-list') ? 'shortlist' : 'tour';
+
+    if (tgtCard && srcId) {
+      if (srcSection === 'tour' && dropSection === 'tour' && tgtCard.dataset.poiId !== srcId) {
+        reorderPlan(State.selectedDayIndex, srcId, tgtCard.dataset.poiId);
+      } else if (srcSection === 'shortlist' && dropSection === 'tour') {
+        promoteFromShortlist(srcId);
+      } else if (srcSection === 'tour' && dropSection === 'shortlist') {
+        addToShortlist(srcId);
+      }
     }
-    srcId = null; origCard = null;
+    srcId = null; origCard = null; srcSection = null;
   });
 }
 
