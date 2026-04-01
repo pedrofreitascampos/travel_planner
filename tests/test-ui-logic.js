@@ -410,6 +410,46 @@ test('addPoi: does not crash when POI has undefined availableDays', () => {
   assert.ok(!ctx.State.plan['2026-06-01'].includes('poi-no-days'), 'should not be added');
 });
 
+// ─── Per-POI transport mode ──────────────────────────────────
+
+test('getPoiTransportMode: defaults to foot when no override', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  assert.strictEqual(ctx.getPoiTransportMode('poi-1'), 'foot');
+});
+
+test('getPoiTransportMode: returns driving when set', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.poiTransport['poi-1'] = 'driving';
+  assert.strictEqual(ctx.getPoiTransportMode('poi-1'), 'driving');
+});
+
+test('togglePoiTransport: toggles foot to driving', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  assert.strictEqual(ctx.State.poiTransport['poi-1'] || 'foot', 'foot');
+  ctx.togglePoiTransport('poi-1');
+  assert.strictEqual(ctx.State.poiTransport['poi-1'], 'driving');
+});
+
+test('togglePoiTransport: toggles driving back to foot', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.poiTransport['poi-1'] = 'driving';
+  ctx.togglePoiTransport('poi-1');
+  assert.strictEqual(ctx.State.poiTransport['poi-1'], 'foot');
+});
+
+test('buildSharePayload: includes poiTransport', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.poiTransport['poi-1'] = 'driving';
+  const payload = ctx.buildSharePayload();
+  assert.ok(payload.poiTransport, 'should include poiTransport');
+  assert.strictEqual(payload.poiTransport['poi-1'], 'driving');
+});
+
 test('addPoi: adds POI to current day plan', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);

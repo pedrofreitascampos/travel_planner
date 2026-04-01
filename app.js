@@ -331,6 +331,7 @@ const State = {
   dayRouteMode: {},       // 'YYYY-MM-DD' → 'foot' | 'driving'
   dayLabels: {},          // 'YYYY-MM-DD' → custom label string
   dayEmojis: {},          // 'YYYY-MM-DD' → custom emoji
+  poiTransport: {},       // 'poi-id' → 'driving' (default is foot — only overrides stored)
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -351,6 +352,7 @@ const Storage = {
       dayRouteMode: State.dayRouteMode,
       dayLabels: State.dayLabels,
       dayEmojis: State.dayEmojis,
+      poiTransport: State.poiTransport,
     });
   },
   saveParty() {
@@ -1571,9 +1573,13 @@ function stopRouteReplay() {
 function clearAllRoutes() {
   stopRouteReplay();
   if (!State.map) return;
-  // Clear in-city route
+  // Clear in-city route (can be single layer or array of per-leg layers)
   if (State.routePolyline) {
-    State.map.removeLayer(State.routePolyline);
+    if (Array.isArray(State.routePolyline)) {
+      State.routePolyline.forEach(l => { try { State.map.removeLayer(l); } catch {} });
+    } else {
+      try { State.map.removeLayer(State.routePolyline); } catch {}
+    }
     State.routePolyline = null;
   }
   // Clear inter-city route (can be single layer or array of layers)
@@ -1614,35 +1620,87 @@ async function drawRoute(dayIndex) {
     drawInterCityRoute(dayIndex, poiWaypoints);
   }
 
-  // 2. In-city POI route — shown for both same-city and inter-city days
+  // 2. In-city POI route — per-leg routing based on each POI's transport mode
   {
     if (poiWaypoints.length === 0) {
       updateRouteSummaryUI(null);
       renderDayMetricsUI(dayIndex, 0);
     } else {
+      const poiIds = plan.map(id => getPoi(id)).filter(Boolean);
       const dayMode = getEffectiveRouteMode(day.date);
-      const inCityWaypoints = [];
-      if (dayMode === 'driving' && arrCoords?.lat && arrCoords?.lng) {
-        inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+
+      // Build legs: [from, to, mode] — acc → POI1 → POI2 → ... → acc
+      const legs = [];
+      const allPoints = [...poiWaypoints];
+      const allModes = poiIds.map(p => getPoiTransportMode(p.id));
+
+      // Add acc as start if driving to first POI
+      if (arrCoords?.lat && arrCoords?.lng && allModes[0] === 'driving') {
+        allPoints.unshift([arrCoords.lat, arrCoords.lng]);
+        allModes.unshift('driving'); // placeholder — mode is for destination
       }
-      inCityWaypoints.push(...poiWaypoints);
-      if (dayMode === 'driving' && arrCoords?.lat && arrCoords?.lng) {
-        inCityWaypoints.push([arrCoords.lat, arrCoords.lng]);
+      // Add acc as end if driving back from last POI
+      if (arrCoords?.lat && arrCoords?.lng && allModes[allModes.length - 1] === 'driving') {
+        allPoints.push([arrCoords.lat, arrCoords.lng]);
       }
-      const result = await fetchRoute(inCityWaypoints.length >= 2 ? inCityWaypoints : poiWaypoints, dayMode);
-      if (gen !== _inCityRouteGen) return; // stale — user already switched days
-      if (result) {
-        State.lastRouteResult = result;
-        const routeStyle = dayMode === 'foot'
-          ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
-          : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
-        if (result.geojson) {
-          State.routePolyline = L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map);
-        } else {
-          State.routePolyline = L.polyline(poiWaypoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map);
+
+      // Group consecutive waypoints by mode to minimise OSRM calls
+      let totalDistKm = 0, totalDurMin = 0;
+      const layers = [];
+      let legStart = 0;
+      for (let i = 1; i <= allPoints.length; i++) {
+        // Determine this leg's mode: mode of the destination POI
+        const legMode = allModes[Math.min(i, allModes.length - 1)] || dayMode;
+        const nextMode = i < allPoints.length ? (allModes[Math.min(i + 1, allModes.length - 1)] || dayMode) : null;
+        const modeChanges = nextMode !== null && nextMode !== legMode;
+        const isLast = i === allPoints.length;
+
+        if (modeChanges || isLast) {
+          const legPoints = allPoints.slice(legStart, i + (isLast ? 0 : 1));
+          if (legPoints.length >= 2) {
+            const result = await fetchRoute(legPoints, legMode);
+            if (gen !== _inCityRouteGen) return;
+            if (result) {
+              totalDistKm += result.distKm;
+              totalDurMin += result.durMin;
+              const routeStyle = legMode === 'foot'
+                ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
+                : { color: '#2e7d32', weight: 4, opacity: 0.8, dashArray: null };
+              if (result.geojson) {
+                layers.push(L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map));
+              } else {
+                layers.push(L.polyline(legPoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map));
+              }
+            }
+          }
+          legStart = i;
         }
-        updateRouteSummaryUI(result);
-        renderDayMetricsUI(dayIndex, result.distKm);
+      }
+
+      // Fallback: if grouping produced no legs, route everything with day mode
+      if (layers.length === 0 && allPoints.length >= 2) {
+        const result = await fetchRoute(allPoints, dayMode);
+        if (gen !== _inCityRouteGen) return;
+        if (result) {
+          totalDistKm = result.distKm;
+          totalDurMin = result.durMin;
+          const routeStyle = dayMode === 'foot'
+            ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
+            : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
+          if (result.geojson) {
+            layers.push(L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map));
+          } else {
+            layers.push(L.polyline(allPoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map));
+          }
+        }
+      }
+
+      if (layers.length > 0) {
+        State.routePolyline = layers.length === 1 ? layers[0] : layers;
+        const combined = { distKm: totalDistKm, durMin: totalDurMin, isFallback: false };
+        State.lastRouteResult = combined;
+        updateRouteSummaryUI(combined);
+        renderDayMetricsUI(dayIndex, totalDistKm);
       } else {
         updateRouteSummaryUI(null);
         renderDayMetricsUI(dayIndex, 0);
@@ -2217,8 +2275,13 @@ function buildPoiCardHtml(poiId, idx) {
   const badges = [];
   if (poi.bookAhead && !isBooked) badges.push('<span class="badge badge-warning">⚠️ Book ahead</span>');
 
+  const tMode = getPoiTransportMode(poiId);
+  const tIcon = tMode === 'driving' ? '🚗' : '🚶';
+  const tTitle = tMode === 'driving' ? 'Drive here (click to switch to walk)' : 'Walk here (click to switch to drive)';
+
   return `<div class="poi-card${isBooked ? ' confirmed' : ''}" data-poi-id="${poiId}" draggable="true">
     <div class="drag-handle" title="Drag to reorder">⠿</div>
+    <button class="poi-transport-btn" onclick="event.stopPropagation(); App.togglePoiTransport('${esc(poiId)}')" title="${tTitle}">${tIcon}</button>
     <div class="poi-thumb" id="pt-${poiId}"><span class="thumb-fallback">${cat.icon}</span></div>
     <div class="poi-info">
       <div class="poi-card-name" title="${esc(poi.name)}">${esc(poi.name)}</div>
@@ -2228,8 +2291,7 @@ function buildPoiCardHtml(poiId, idx) {
         ${poi.confirmedBooking && poi.bookingTime ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || 'Booked')}">🕐 ${esc(poi.bookingTime)}</span>` : poi.confirmedBooking ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || '')}">✅ Booked</span>` : ''}
         ${badges.join('')}
       </div>
-      ${poi.rating ? `<div class="poi-stars" title="Rating: ${poi.rating}/5">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</div>` : ''}
-      <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
+      <div class="poi-ratings">${poi.rating ? `<span class="poi-stars" title="Rating: ${poi.rating}/5">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : ''}<span class="poi-kids">${getKidsHtml(poi.kidsRating)}</span></div>
     </div>
     <div class="poi-actions">
       <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${esc(poiId)}')" title="Edit">✏️</button>
@@ -3250,6 +3312,18 @@ function setDayRouteMode(date, mode) {
   State.dayRouteMode[date] = mode;
   Storage.save();
   drawRoute(State.selectedDayIndex);
+}
+
+function togglePoiTransport(poiId) {
+  const current = State.poiTransport[poiId] || 'foot';
+  State.poiTransport[poiId] = current === 'foot' ? 'driving' : 'foot';
+  Storage.save();
+  renderDayPlanContent(State.selectedDayIndex);
+  drawRoute(State.selectedDayIndex);
+}
+
+function getPoiTransportMode(poiId) {
+  return State.poiTransport[poiId] || 'foot';
 }
 
 // ─── Day Accommodation & Transport ─────────────────────────────
@@ -4888,6 +4962,7 @@ async function loadTrip(tripId) {
     State.dayRouteMode = saved.dayRouteMode ?? {};
     State.dayLabels = saved.dayLabels ?? {};
     State.dayEmojis = saved.dayEmojis ?? {};
+    State.poiTransport = saved.poiTransport ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
@@ -4897,6 +4972,7 @@ async function loadTrip(tripId) {
     State.dayRouteMode = {};
     State.dayLabels = {};
     State.dayEmojis = {};
+    State.poiTransport = {};
   }
 
   // Load party config and settings
@@ -5275,6 +5351,7 @@ function buildSharePayload() {
     dayRouteMode: State.dayRouteMode,
     dayLabels: State.dayLabels,
     dayEmojis: State.dayEmojis,
+    poiTransport: State.poiTransport,
     importedPois: State.importedPois,
     userAccommodations: State.trip?.accommodations.filter(a => a.isUserCreated) || [],
     partyConfig: State.partyConfig,
@@ -5500,6 +5577,7 @@ async function loadSharedPlan() {
   if (data.dayRouteMode) State.dayRouteMode = data.dayRouteMode;
   if (data.dayLabels) State.dayLabels = data.dayLabels;
   if (data.dayEmojis) State.dayEmojis = data.dayEmojis;
+  if (data.poiTransport) State.poiTransport = data.poiTransport;
   Storage.save();
   if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
   // Restore user-created accommodations
@@ -5660,6 +5738,7 @@ window.App = {
   setRouteDiscoveryRadius,
   addNewAccommodation,
   setDayRouteMode,
+  togglePoiTransport,
   setTransportType,
   setTransportCost,
   openAccEditModal,

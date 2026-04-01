@@ -317,6 +317,8 @@ function createTestContext() {
     window.renderPackingWeatherSummary = renderPackingWeatherSummary;
     window.OIKUMENE_CAT_MAP = OIKUMENE_CAT_MAP;
     window.buildOikumeneExport = buildOikumeneExport;
+    window.getPoiTransportMode = getPoiTransportMode;
+    window.togglePoiTransport = togglePoiTransport;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });
