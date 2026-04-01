@@ -315,6 +315,24 @@ test('formatDuration: handles exact hours', () => {
   assert.strictEqual(ctx.formatDuration(120), '2h');
 });
 
+test('formatDuration: does not produce "3h 60m" when minutes round up', () => {
+  const ctx = createTestContext();
+  // 239.5 → Math.round = 240 → 4h 0m → "4h"
+  assert.strictEqual(ctx.formatDuration(239.5), '4h');
+  // 179.7 → Math.round = 180 → 3h 0m → "3h"
+  assert.strictEqual(ctx.formatDuration(179.7), '3h');
+  // 119.6 → Math.round = 120 → 2h 0m → "2h"
+  assert.strictEqual(ctx.formatDuration(119.6), '2h');
+});
+
+test('formatDuration: fractional minutes near boundary', () => {
+  const ctx = createTestContext();
+  // 59.5 → Math.round = 60 → 1h 0m → "1h"
+  assert.strictEqual(ctx.formatDuration(59.5), '1h');
+  // 59.4 → Math.round = 59 → "59 min"
+  assert.strictEqual(ctx.formatDuration(59.4), '59 min');
+});
+
 test('formatDist: shows meters for < 1km', () => {
   const ctx = createTestContext();
   assert.strictEqual(ctx.formatDist(0.5), '500 m');

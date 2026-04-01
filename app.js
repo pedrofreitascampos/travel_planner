@@ -440,9 +440,10 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 }
 
 function formatDuration(minutes) {
-  if (minutes < 60) return `${Math.round(minutes)} min`;
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
+  const total = Math.round(minutes);
+  if (total < 60) return `${total} min`;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
@@ -1158,13 +1159,13 @@ function renderPackingWeatherSummary() {
 
 // Tooltip descriptions for each metric bar label
 const METRIC_TOOLTIPS = {
-  'Family Fit':   'How suitable this day is for your party — influenced by kids-friendly ratings, museum density, and drive time',
-  'Cultural':     'Cultural richness of the day — monuments, museums, and historic sites',
-  'Gastronomic':  'Food & drink experience — restaurants, local cuisine, markets, and bars',
-  'Relaxation':   'How restful the day is — beaches, parks, and nature outweigh heavy sightseeing',
-  'Fun':          'Overall enjoyment factor — entertainment, variety, and spontaneity',
-  'Kids Fun':     'Fun specifically for the kids in your party — playgrounds, beaches, and kid-rated activities',
-  'Logistics':    'Smoothness of the day — higher is better; penalised by transfers, bookings, and friction',
+  'Family Fit':   'Party suitability — based on kids-friendly ratings per POI, museum/monument density (penalised for under-4s), and long drives (>2h). Improve: add parks, beaches, or shorten the drive.',
+  'Cultural':     'Cultural depth — each monument or museum adds ~2 points. Improve: add a historic site or museum. Lower: swap one for a park or beach.',
+  'Gastronomic':  'Food & drink — each restaurant/bar adds ~2 points, food markets count too. Improve: plan a meal at a local restaurant or food hall.',
+  'Relaxation':   'Restfulness — beaches and parks score high, many monuments or long durations drag it down. Improve: add a beach, park, or remove a packed activity.',
+  'Fun':          'Enjoyment — entertainment and variety boost this; single-category days score lower. Improve: mix categories or add an entertainment stop.',
+  'Kids Fun':     'Kid enjoyment — uses each POI\'s kids rating (not the adult one). Beaches, parks, and theme parks score highest. Improve: add a playground, beach, or kids-rated activity.',
+  'Logistics':    'Day smoothness — penalised by pre-booked activities (+2.5 each), long drives (>90min), and inter-city transfers. Improve: reduce bookings or shorten travel.',
 };
 
 // ─── Metric Bar HTML ───────────────────────────────────────────
@@ -1611,14 +1612,10 @@ async function drawRoute(dayIndex) {
   // 1. Inter-city route — include detour POIs as waypoints
   if (isInterCity) {
     drawInterCityRoute(dayIndex, poiWaypoints);
-    if (poiWaypoints.length === 0) {
-      updateRouteSummaryUI(null);
-      renderDayMetricsUI(dayIndex, 0);
-    }
   }
 
-  // 2. In-city route — on same-city days include acc as start/end
-  if (!isInterCity) {
+  // 2. In-city POI route — shown for both same-city and inter-city days
+  {
     if (poiWaypoints.length === 0) {
       updateRouteSummaryUI(null);
       renderDayMetricsUI(dayIndex, 0);
@@ -1813,9 +1810,8 @@ async function drawInterCityRoute(dayIndex, poiWaypoints = []) {
   document.querySelectorAll('.drive-info-detail').forEach(el => {
     el.textContent = `${formatDuration(result.durMin)} · ${Math.round(result.distKm)} km`;
   });
-
-  updateRouteSummaryUI(result);
-  renderDayMetricsUI(dayIndex, result.distKm);
+  // Don't update route summary here — that's for in-city POI routes only.
+  // The inter-city drive is already shown in the drive-info section above.
 }
 
 // ─── Effective Day Label ────────────────────────────────────────
