@@ -355,6 +355,43 @@ test('getPoisAvailableToAdd: excludes POIs already in plan', () => {
   assert.ok(ids.includes('poi-free'), 'poi-free should be available');
 });
 
+test('getPoisAvailableToAdd: does not crash when POI has undefined availableDays', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  // Simulate a POI loaded from Firebase with missing availableDays
+  ctx.State.trip.pois.push({
+    id: 'poi-broken', name: 'Broken POI', category: 'monument',
+    lat: 38.7, lng: -9.1, duration: 1, cost: 0, costAmount: 0,
+    costLabel: 'Free', rating: 4, kidsFriendly: 3, kidsRating: 3,
+    energyCost: 1, description: '', source: 'imported',
+    availableDays: undefined, tags: [],
+  });
+
+  // Should not throw
+  const available = ctx.getPoisAvailableToAdd(0);
+  assert.ok(Array.isArray(available), 'should return an array');
+  assert.ok(!available.find(p => p.id === 'poi-broken'), 'POI without availableDays should not appear');
+});
+
+test('addPoi: does not crash when POI has undefined availableDays', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+
+  ctx.State.trip.pois.push({
+    id: 'poi-no-days', name: 'No Days', category: 'monument',
+    lat: 38.7, lng: -9.1, duration: 1, cost: 0, costAmount: 0,
+    costLabel: 'Free', rating: 4, kidsFriendly: 3, kidsRating: 3,
+    energyCost: 1, description: '', source: 'imported',
+    availableDays: undefined, tags: [],
+  });
+
+  ctx.State.selectedDayIndex = 0;
+  // Should not throw — just show toast "Not available on this day"
+  ctx.addPoi('poi-no-days');
+  assert.ok(!ctx.State.plan['2026-06-01'].includes('poi-no-days'), 'should not be added');
+});
+
 test('addPoi: adds POI to current day plan', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);
