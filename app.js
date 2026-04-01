@@ -410,6 +410,7 @@ const Storage = {
         costLabel: p.costLabel || 'Free',
         kidsFriendly: p.kidsFriendly ?? p.kidsRating ?? 3,
         kidsRating: p.kidsRating ?? p.kidsFriendly ?? 3,
+        myRating: p.myRating || 0,
         description: p.description || '', confirmedBooking: p.confirmedBooking || false,
         bookingTime: p.bookingTime || '', bookingRef: p.bookingRef || '',
       };
@@ -2335,7 +2336,7 @@ function buildPoiCardHtml(poiId, idx) {
     <div class="drag-handle" title="Drag to reorder">⠿</div>
     <button class="poi-transport-btn" onclick="event.stopPropagation(); App.togglePoiTransport('${esc(poiId)}')" title="${tTitle}">${tIcon}</button>
     <div class="poi-thumb" id="pt-${poiId}"><span class="thumb-fallback">${cat.icon}</span></div>
-    <div class="poi-info">
+    <div class="poi-info" onclick="App.openDetail('${esc(poiId)}')" style="cursor:pointer;">
       <div class="poi-card-name" title="${esc(poi.name)}">${esc(poi.name)}</div>
       <div class="poi-card-meta">
         ${getCostHtml(poi)}
@@ -2343,7 +2344,7 @@ function buildPoiCardHtml(poiId, idx) {
         ${poi.confirmedBooking && poi.bookingTime ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || 'Booked')}">🕐 ${esc(poi.bookingTime)}</span>` : poi.confirmedBooking ? `<span class="badge badge-booking" title="${esc(poi.bookingRef || '')}">✅ Booked</span>` : ''}
         ${badges.join('')}
       </div>
-      <div class="poi-ratings">${poi.rating ? `<span class="poi-stars" title="Rating: ${poi.rating}/5">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : ''}<span class="poi-kids">${getKidsHtml(poi.kidsRating)}</span></div>
+      <div class="poi-ratings">${poi.myRating ? `<span class="poi-stars poi-my-rating" title="My rating: ${poi.myRating}/5">${'★'.repeat(poi.myRating)}${'☆'.repeat(5-poi.myRating)}</span>` : poi.rating ? `<span class="poi-stars" title="Rating: ${poi.rating}/5">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : ''}<span class="poi-kids">${getKidsHtml(poi.kidsRating)}</span></div>
     </div>
     <div class="poi-actions">
       <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${esc(poiId)}')" title="Edit">✏️</button>
@@ -4598,7 +4599,7 @@ const EMOJI_GRID = ['🏛️','🎨','🍽️','🍷','🌿','🌳','🏖️','�
 
 function buildEmojiPickerHtml(inputId, extraClass) {
   return `<div class="emoji-picker-grid ${extraClass || ''}" data-target="${inputId}">
-    ${EMOJI_GRID.map(e => `<button type="button" class="emoji-pick-btn" onclick="App.pickEmoji(this,'${inputId}')">${e}</button>`).join('')}
+    ${EMOJI_GRID.map(e => `<button type="button" class="emoji-pick-btn" onclick="event.stopPropagation(); App.pickEmoji(this,'${inputId}')">${e}</button>`).join('')}
   </div>`;
 }
 
@@ -4617,6 +4618,9 @@ function pickEmoji(btn, inputId) {
   }
   // Also trigger preview update if pe-emoji
   if (inputId === 'pe-emoji') pePreviewIcon();
+  // Close the picker after selection
+  const picker = btn.closest('.emoji-picker-grid')?.parentElement;
+  if (picker) picker.classList.add('hidden');
 }
 
 function toggleEmojiPicker(pickerId) {
@@ -4681,6 +4685,18 @@ function openPoiEditModal(poiId) {
             <select id="pe-kids" class="settings-input">
               ${[1,2,3,4,5].map(n => `<option value="${n}"${(poi.kidsFriendly||poi.kidsRating||3)===n?' selected':''}>${'🧒'.repeat(n)}</option>`).join('')}
             </select>
+          </div>
+        </div>
+        <div class="settings-row-2">
+          <div class="settings-field">
+            <label class="settings-label">My rating</label>
+            <select id="pe-my-rating" class="settings-input">
+              <option value="0"${!poi.myRating ? ' selected' : ''}>— none —</option>
+              ${[1,2,3,4,5].map(n => `<option value="${n}"${poi.myRating===n?' selected':''}>${'★'.repeat(n)}${'☆'.repeat(5-n)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">${poi.rating ? `Source rating: ${'★'.repeat(Math.round(poi.rating))} (${poi.rating})` : 'No source rating'}</label>
           </div>
         </div>
         <div class="settings-field">
@@ -4759,6 +4775,8 @@ function savePoiEdit(poiId) {
   poi.emoji = emoji;
   if (!isNaN(duration)) poi.duration = duration;
   if (!isNaN(kids)) { poi.kidsFriendly = kids; poi.kidsRating = kids; }
+  const myRating = parseInt(document.getElementById('pe-my-rating')?.value, 10);
+  poi.myRating = myRating > 0 ? myRating : 0;
   if (notes !== undefined) poi.description = notes;
   poi.costAmount = costAmt;
   poi.cost = costAmt > 0 ? costAmt : 'free';
@@ -5432,6 +5450,7 @@ async function loadTrip(tripId) {
     if (edit.duration != null) poi.duration = edit.duration;
     if (edit.costAmount != null) { poi.costAmount = edit.costAmount; poi.costLabel = edit.costLabel; poi.cost = edit.cost ?? poi.cost; }
     if (edit.kidsFriendly != null) { poi.kidsFriendly = edit.kidsFriendly; poi.kidsRating = edit.kidsRating; }
+    if (edit.myRating != null) poi.myRating = edit.myRating;
     if (edit.description != null) poi.description = edit.description;
     poi.confirmedBooking = edit.confirmedBooking ?? poi.confirmedBooking;
     poi.bookingTime = edit.bookingTime ?? poi.bookingTime;

@@ -847,6 +847,7 @@ body.modal-open #map {
 .btn-move-day:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 .poi-stars { font-size: 10px; color: #f0c040; letter-spacing: 0.3px; line-height: 1; }
+.poi-my-rating { color: #ff8a00; }
 
 /* ─── Shortlist Section ──────────────────────────────────────── */
 .shortlist-section {

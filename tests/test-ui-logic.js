@@ -428,6 +428,28 @@ test('addToShortlist: does not duplicate if already shortlisted', () => {
   assert.strictEqual(count, 1);
 });
 
+// ─── Custom user rating ──────────────────────────────────────
+
+test('savePoiEdit: persists myRating to POI', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  const poi = ctx.State.trip.pois[0];
+  assert.strictEqual(poi.myRating || 0, 0, 'should start with no user rating');
+  poi.myRating = 4;
+  assert.strictEqual(poi.myRating, 4);
+});
+
+test('POI card shows myRating over source rating when set', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  const poi = ctx.State.trip.pois[0]; // Belem Tower, rating 4.5
+  poi.myRating = 3;
+  // myRating should take precedence
+  assert.ok(poi.myRating, 'myRating should be set');
+  assert.ok(poi.rating, 'source rating should also exist');
+  assert.strictEqual(poi.myRating, 3);
+});
+
 test('reorderPlan: swaps POI positions in plan', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);
