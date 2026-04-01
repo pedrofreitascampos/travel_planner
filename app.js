@@ -2262,6 +2262,16 @@ function renderDayPlanContent(dayIndex) {
           <div class="discover-loading">🔍 Searching along route…</div>
         </div>
       </div>` : ''}
+
+      <div class="discover-group">
+        <div class="discover-group-label">
+          🎭 Cultural Events ·
+          <button class="discover-load-btn" onclick="App.discoverEvents(${dayIndex})">↻</button>
+        </div>
+        <div class="events-discover-results">
+          <div style="font-size:11px;color:var(--color-text-secondary);padding:6px 0;">Click ↻ to find events near this destination</div>
+        </div>
+      </div>
     </div>
 
     <!-- TAB: Details -->
@@ -4402,6 +4412,143 @@ async function _discoverAlongRouteImpl(dayIndex) {
   renderDiscoverResults(allElements, '.route-discover-results', mid.lat, mid.lng, dayIndex);
 }
 
+// ─── Cultural Events (Agora Integration) ────────────────────────
+
+let _agoraEventsCache = null;
+
+async function fetchAgoraEvents() {
+  if (_agoraEventsCache) return _agoraEventsCache;
+  const url = 'https://raw.githubusercontent.com/pedrofreitascampos/agenda-cultural/main/data/events.json';
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url);
+    Log.api('Agora events', url, r.status, Date.now() - t0);
+    if (!r.ok) throw new Error(r.status);
+    _agoraEventsCache = await r.json();
+    return _agoraEventsCache;
+  } catch (e) {
+    Log.warn('api', 'Failed to fetch Agora events', e.message);
+    return [];
+  }
+}
+
+const AGORA_CAT_MAP = {
+  music: 'entertainment', theatre: 'entertainment', dance: 'entertainment',
+  cinema: 'entertainment', exhibitions: 'museum', workshops: 'entertainment',
+  festivals: 'entertainment', literature: 'museum', family: 'entertainment', other: 'monument',
+};
+
+async function discoverEvents(dayIndex) {
+  const day = getDay(dayIndex);
+  if (!day) return;
+  const resultsEl = document.querySelectorAll('.events-discover-results');
+  resultsEl.forEach(el => { el.innerHTML = '<div class="discover-loading">🎭 Loading cultural events…</div>'; });
+
+  try {
+    const events = await fetchAgoraEvents();
+    const acc = getEffectiveAcc(day.date);
+    if (!acc) {
+      resultsEl.forEach(el => { el.innerHTML = '<div class="discover-empty">Set an accommodation first to find nearby events.</div>'; });
+      return;
+    }
+    const { lat, lng } = getAccCoords(acc);
+    const radiusKm = State.settings.discoveryRadius || 10;
+    const date = day.date;
+
+    // Filter: within radius + happening on this day's date
+    const matching = events.filter(e => {
+      if (!e.lat || !e.lng) return false;
+      const dist = haversineKm(lat, lng, e.lat, e.lng);
+      if (dist > radiusKm) return false;
+      const eventEnd = e.dateEnd || e.dateStart;
+      return e.dateStart <= date && eventEnd >= date;
+    });
+
+    if (matching.length === 0) {
+      resultsEl.forEach(el => { el.innerHTML = '<div class="discover-empty">No cultural events found for this date. Try another day.</div>'; });
+      return;
+    }
+
+    // Sort by distance
+    matching.sort((a, b) => haversineKm(lat, lng, a.lat, a.lng) - haversineKm(lat, lng, b.lat, b.lng));
+
+    // Cache matching events for onclick references
+    State._lastEventResults = matching.slice(0, 15);
+
+    const html = State._lastEventResults.map((e, idx) => {
+      const dist = haversineKm(lat, lng, e.lat, e.lng);
+      const cat = AGORA_CAT_MAP[e.category] || 'entertainment';
+      const catIcon = CATEGORIES[cat]?.icon || '🎭';
+      const costStr = e.cost || '';
+      const timeStr = e.timeStart || '';
+      const venueStr = e.venue || '';
+      const sub = [venueStr, timeStr, costStr, formatDist(dist)].filter(Boolean).join(' · ');
+      const id = `event-${slugify(e.title)}-${Math.floor(e.lat * 1000)}`;
+      const exists = State.trip.pois.find(p => p.id === id);
+
+      return `<div class="discover-card">
+        <div class="discover-card-icon">${catIcon}</div>
+        <div class="discover-card-info">
+          <div class="discover-card-name">${esc(e.title)}</div>
+          <div class="discover-card-sub">${esc(sub)}</div>
+        </div>
+        ${exists ? '<span style="font-size:10px;color:var(--color-text-secondary);">✓</span>'
+          : `<button class="btn-add-poi" onclick="App.addEventAsPoi('${esc(id)}', ${idx}, ${dayIndex})" title="Add to trip">+</button>`}
+      </div>`;
+    }).join('');
+
+    resultsEl.forEach(el => { el.innerHTML = html; });
+  } catch (e) {
+    Log.error('action', 'Discover events failed', e.message);
+    resultsEl.forEach(el => { el.innerHTML = '<div class="discover-empty">Failed to load events. Try again.</div>'; });
+  }
+}
+
+function addEventAsPoi(id, eventIdx, dayIndex) {
+  if (!State.trip) return;
+  const event = State._lastEventResults?.[eventIdx];
+  if (!event) return;
+  if (State.trip.pois.find(p => p.id === id)) { showToast('Already added'); return; }
+  const cat = AGORA_CAT_MAP[event.category] || 'entertainment';
+  const nearestAcc = findNearestDestination(event.lat, event.lng);
+  const availableDays = nearestAcc ? nearestAcc.days : State.trip.days.map(d => d.date);
+
+  const poi = {
+    id, name: event.title, lat: event.lat, lng: event.lng,
+    category: cat, source: 'imported',
+    destination: nearestAcc ? nearestAcc.location : 'Unknown',
+    description: [event.venue, event.description].filter(Boolean).join(' — ').slice(0, 300),
+    rating: null, ratingCount: 0,
+    cost: 0, costLabel: event.cost || 'Check locally', costAmount: 0,
+    duration: 2, energyCost: 2,
+    kidsRating: event.category === 'family' ? 5 : 3,
+    kidsFriendly: event.category === 'family' ? 5 : 3,
+    gmapsUrl: event.sourceUrl || `https://maps.google.com/?q=${event.lat},${event.lng}`,
+    bookAhead: false, confirmedBooking: false,
+    tags: ['event', event.category || 'culture'].filter(Boolean),
+    openingHours: event.timeStart ? `${event.timeStart}${event.timeEnd ? '–' + event.timeEnd : ''}` : 'Check locally',
+    availableDays, notes: '',
+  };
+
+  State.trip.pois.push(poi);
+  State.importedPois.push(poi);
+  Storage.saveImported(State.trip.id);
+
+  // Add to current day plan
+  const day = getDay(dayIndex);
+  if (day && availableDays.includes(day.date)) {
+    if (!State.plan[day.date]) State.plan[day.date] = [];
+    State.plan[day.date].push(id);
+    Storage.save();
+  }
+
+  Log.action('Event added from Agora', { id, title: event.title, category: event.category });
+  placeMarkers();
+  renderDayPlanContent(dayIndex);
+  drawRoute(dayIndex);
+  showToast(`Added "${event.title}"`);
+}
+
 // ─── Emoji Picker Helper ────────────────────────────────────────
 
 const EMOJI_GRID = ['🏛️','🎨','🍽️','🍷','🌿','🌳','🏖️','🦇','🎢','🚶','🏰','⛪','🌊','🏨','🎭','🛍️','🎪','⛰️','🏛','🗿'];
@@ -5952,6 +6099,8 @@ window.App = {
   removeFromShortlist,
   discoverNearby,
   discoverAlongRoute,
+  discoverEvents,
+  addEventAsPoi,
   openPoiEditModal,
   pePreviewIcon,
   savePoiEdit,
