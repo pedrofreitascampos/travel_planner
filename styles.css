@@ -848,6 +848,57 @@ body.modal-open #map {
 
 .poi-stars { font-size: 10px; color: #f0c040; letter-spacing: 0.3px; line-height: 1; }
 
+/* ─── Shortlist Section ──────────────────────────────────────── */
+.shortlist-section {
+  margin-top: 8px;
+  padding: 0 4px;
+}
+.shortlist-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.shortlist-count {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+}
+.shortlist-list { display: flex; flex-direction: column; gap: 3px; }
+.shortlist-card {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 5px;
+  background: rgba(255,255,255,0.6);
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.shortlist-icon { font-size: 14px; flex-shrink: 0; }
+.shortlist-info { flex: 1; min-width: 0; }
+.shortlist-name { font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shortlist-meta { font-size: 10px; color: var(--color-text-secondary); }
+.btn-shortlist-promote, .btn-shortlist-remove {
+  width: 22px; height: 22px; border: 1px solid var(--color-border);
+  border-radius: 4px; background: none; cursor: pointer; font-size: 10px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.btn-shortlist-promote:hover { background: #e8f5e9; border-color: #4caf50; }
+.btn-shortlist-remove:hover { background: #fff0f0; border-color: #c62828; }
+.btn-shortlist, .btn-shortlist-demote {
+  background: none; border: 1px solid var(--color-border); border-radius: 4px;
+  cursor: pointer; font-size: 10px; padding: 2px 4px;
+  transition: all 0.15s;
+}
+.btn-shortlist:hover, .btn-shortlist-demote:hover { background: #fff3e0; border-color: #ff9800; }
+
 /* ─── Add More Section ────────────────────────────────────────── */
 .add-more-section {
   padding: 12px;
@@ -2588,6 +2639,7 @@ button:focus-visible, select:focus-visible, input:focus-visible {
 
   /* Cards & inputs */
   .poi-card { background: var(--color-card-bg); border-color: var(--color-border); }
+  .shortlist-card { background: rgba(255,255,255,0.05); border-color: var(--color-border); }
   .add-poi-card { background: var(--color-card-bg); border-color: var(--color-border); }
   .transport-card { background: var(--color-card-bg); border-color: var(--color-border); }
   .acc-card { background: var(--color-card-bg); border-color: var(--color-border); }

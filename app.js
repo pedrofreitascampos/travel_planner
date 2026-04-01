@@ -294,6 +294,7 @@ const State = {
   trip: null,
   selectedDayIndex: 0,
   plan: {},               // { 'YYYY-MM-DD': ['poi-id', ...] }
+  shortlist: {},          // { 'YYYY-MM-DD': ['poi-id', ...] } — tentative/backup POIs
   layers: {
     showUser: true,
     showSuggested: true,
@@ -353,6 +354,7 @@ const Storage = {
       dayLabels: State.dayLabels,
       dayEmojis: State.dayEmojis,
       poiTransport: State.poiTransport,
+      shortlist: State.shortlist,
     });
   },
   saveParty() {
@@ -506,8 +508,9 @@ function getPoisAvailableToAdd(dayIndex) {
   const day = getDay(dayIndex);
   if (!day) return [];
   const inPlan = State.plan[day.date] || [];
+  const inShortlist = State.shortlist[day.date] || [];
   return State.trip.pois.filter(p =>
-    (p.availableDays || []).includes(day.date) && !inPlan.includes(p.id)
+    (p.availableDays || []).includes(day.date) && !inPlan.includes(p.id) && !inShortlist.includes(p.id)
   );
 }
 
@@ -1395,6 +1398,13 @@ function makePOIIcon(poi, dayIndex) {
   return L.divIcon({ html, className: '', iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -18] });
 }
 
+function makeShortlistIcon(poi, dayIndex) {
+  const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
+  const color = dayIndex >= 0 ? getDayColor(dayIndex) : cat.color;
+  const html = `<div style="width:30px;height:30px;border-radius:50%;background:${color};opacity:0.5;border:2px dashed rgba(255,255,255,0.8);box-shadow:0 1px 4px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${cat.icon}</div>`;
+  return L.divIcon({ html, className: '', iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -16] });
+}
+
 function makeAccIcon() {
   const html = `<div style="width:30px;height:30px;border-radius:50%;background:#1a1a2e;border:2.5px solid rgba(255,255,255,0.9);box-shadow:0 2px 6px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:14px;">🏨</div>`;
   return L.divIcon({ html, className: '', iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -16] });
@@ -1447,14 +1457,19 @@ function placeMarkers() {
     // Category filter
     if (!State.layers.categories[poi.category]) return;
 
-    // Day filter: only show POIs that are in the plan for a shown date
+    // Day filter: show POIs in plan OR shortlist for shown dates
     const planDate = State.trip.days.find(d =>
       shownDates.has(d.date) && (State.plan[d.date] || []).includes(poi.id)
     );
-    if (!planDate) return;
+    const shortlistDate = !planDate ? State.trip.days.find(d =>
+      shownDates.has(d.date) && (State.shortlist[d.date] || []).includes(poi.id)
+    ) : null;
+    if (!planDate && !shortlistDate) return;
 
-    const dayIndex = getDayIndexForDate(planDate.date);
-    const marker = L.marker([poi.lat, poi.lng], { icon: makePOIIcon(poi, dayIndex) })
+    const isShortlisted = !!shortlistDate;
+    const dayIndex = getDayIndexForDate((planDate || shortlistDate).date);
+    const icon = isShortlisted ? makeShortlistIcon(poi, dayIndex) : makePOIIcon(poi, dayIndex);
+    const marker = L.marker([poi.lat, poi.lng], { icon })
       .addTo(State.map)
       .bindPopup(buildPopupHTML(poi), { maxWidth: 230, minWidth: 175 });
 
@@ -2136,6 +2151,14 @@ function renderDayPlanContent(dayIndex) {
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
 
+  // Shortlist for this day
+  const shortlistIds = State.shortlist[day.date] || [];
+  const shortlistHtml = shortlistIds.length > 0 ? `
+    <div class="shortlist-section">
+      <div class="shortlist-header">📌 Shortlist <span class="shortlist-count">${shortlistIds.length}</span></div>
+      <div class="shortlist-list">${shortlistIds.map(id => buildShortlistCardHtml(id)).join('')}</div>
+    </div>` : '';
+
   const contentHtml = `
     <div class="day-header">
       <div class="day-header-top">
@@ -2182,6 +2205,7 @@ function renderDayPlanContent(dayIndex) {
           ${State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('')}
         </select>
       </div>` : ''}
+      ${shortlistHtml}
       <div class="discover-search-wrap" style="margin-top:8px;">
         <input class="poi-search-input" type="text" placeholder="🔍 Add a place…"
           oninput="App.searchPois(this, ${dayIndex})">
@@ -2314,7 +2338,7 @@ function buildPoiCardHtml(poiId, idx) {
           `<option value="${d.date}">${formatShortDate(d.date)}</option>`
         ).join('')}
       </select>
-      ${isBooked ? '' : `<button class="btn-icon btn-remove" onclick="App.removePoi('${esc(poiId)}')" title="Remove">✕</button>`}
+      ${isBooked ? '' : `<button class="btn-icon btn-shortlist-demote" onclick="App.addToShortlist('${esc(poiId)}')" title="Move to shortlist">📌</button><button class="btn-icon btn-remove" onclick="App.removePoi('${esc(poiId)}')" title="Remove">✕</button>`}
     </div>
   </div>`;
 }
@@ -2331,7 +2355,24 @@ function buildAddCardHtml(poi) {
       <div class="poi-kids">${getKidsHtml(poi.kidsRating)}</div>
     </div>
     <button class="btn-icon btn-edit-sm" onclick="App.openPoiEditModal('${esc(poi.id)}')" title="Edit">✏️</button>
+    <button class="btn-shortlist" onclick="App.addToShortlist('${esc(poi.id)}')" title="Add to shortlist">📌</button>
     <button class="btn-add-poi" onclick="App.addPoi('${esc(poi.id)}')">+</button>
+  </div>`;
+}
+
+function buildShortlistCardHtml(poiId) {
+  const poi = getPoi(poiId);
+  if (!poi) return '';
+  const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
+  const icon = poi.emoji || cat.icon;
+  return `<div class="shortlist-card">
+    <div class="shortlist-icon">${icon}</div>
+    <div class="shortlist-info">
+      <div class="shortlist-name">${esc(poi.name)}</div>
+      <div class="shortlist-meta">${poi.duration}h · ${poi.costLabel || 'Free'}${poi.rating ? ` · ${'★'.repeat(Math.round(poi.rating))}` : ''}</div>
+    </div>
+    <button class="btn-shortlist-promote" onclick="App.promoteFromShortlist('${esc(poiId)}')" title="Add to tour">▲</button>
+    <button class="btn-shortlist-remove" onclick="App.removeFromShortlist('${esc(poiId)}')" title="Remove">✕</button>
   </div>`;
 }
 
@@ -3324,6 +3365,62 @@ function setDayRouteMode(date, mode) {
   State.dayRouteMode[date] = mode;
   Storage.save();
   drawRoute(State.selectedDayIndex);
+}
+
+// ─── Shortlist (tentative/backup POIs) ──────────────────────────
+
+function addToShortlist(poiId) {
+  const day = getDay(State.selectedDayIndex);
+  if (!day) return;
+  const date = day.date;
+  if (!State.shortlist[date]) State.shortlist[date] = [];
+  if (State.shortlist[date].includes(poiId)) return;
+  // Remove from plan if it was there
+  if (State.plan[date]?.includes(poiId)) {
+    State.plan[date] = State.plan[date].filter(id => id !== poiId);
+  }
+  State.shortlist[date].push(poiId);
+  Storage.save();
+  const poi = getPoi(poiId);
+  Log.action('POI shortlisted', { id: poiId, name: poi?.name, date });
+  placeMarkers();
+  renderDayPlanContent(State.selectedDayIndex);
+  drawRoute(State.selectedDayIndex);
+}
+
+function promoteFromShortlist(poiId) {
+  const day = getDay(State.selectedDayIndex);
+  if (!day) return;
+  const date = day.date;
+  // Remove from shortlist
+  if (State.shortlist[date]) {
+    State.shortlist[date] = State.shortlist[date].filter(id => id !== poiId);
+  }
+  // Add to plan
+  if (!State.plan[date]) State.plan[date] = [];
+  if (!State.plan[date].includes(poiId)) State.plan[date].push(poiId);
+  Storage.save();
+  const poi = getPoi(poiId);
+  Log.action('POI promoted from shortlist', { id: poiId, name: poi?.name, date });
+  placeMarkers();
+  renderDayPlanContent(State.selectedDayIndex);
+  drawRoute(State.selectedDayIndex);
+  showToast(`"${poi?.name}" added to tour`);
+}
+
+function removeFromShortlist(poiId) {
+  const day = getDay(State.selectedDayIndex);
+  if (!day) return;
+  if (State.shortlist[day.date]) {
+    State.shortlist[day.date] = State.shortlist[day.date].filter(id => id !== poiId);
+  }
+  Storage.save();
+  placeMarkers();
+  renderDayPlanContent(State.selectedDayIndex);
+}
+
+function isPoiShortlisted(poiId, date) {
+  return (State.shortlist[date] || []).includes(poiId);
 }
 
 function copyDayPois(fromDayIndex, toDate) {
@@ -5085,6 +5182,7 @@ async function loadTrip(tripId) {
     State.dayLabels = saved.dayLabels ?? {};
     State.dayEmojis = saved.dayEmojis ?? {};
     State.poiTransport = saved.poiTransport ?? {};
+    State.shortlist = saved.shortlist ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
@@ -5095,6 +5193,7 @@ async function loadTrip(tripId) {
     State.dayLabels = {};
     State.dayEmojis = {};
     State.poiTransport = {};
+    State.shortlist = {};
   }
 
   // Load party config and settings
@@ -5474,6 +5573,7 @@ function buildSharePayload() {
     dayLabels: State.dayLabels,
     dayEmojis: State.dayEmojis,
     poiTransport: State.poiTransport,
+    shortlist: State.shortlist,
     importedPois: State.importedPois,
     userAccommodations: State.trip?.accommodations.filter(a => a.isUserCreated) || [],
     partyConfig: State.partyConfig,
@@ -5700,6 +5800,7 @@ async function loadSharedPlan() {
   if (data.dayLabels) State.dayLabels = data.dayLabels;
   if (data.dayEmojis) State.dayEmojis = data.dayEmojis;
   if (data.poiTransport) State.poiTransport = data.poiTransport;
+  if (data.shortlist) State.shortlist = data.shortlist;
   Storage.save();
   if (data.accEdits) { State.accEdits = data.accEdits; Storage.saveAccEdits(data.tripId); }
   // Restore user-created accommodations
@@ -5846,6 +5947,9 @@ window.App = {
   addDiscoveredResult,
   addFromGoogleLink,
   copyDayPois,
+  addToShortlist,
+  promoteFromShortlist,
+  removeFromShortlist,
   discoverNearby,
   discoverAlongRoute,
   openPoiEditModal,

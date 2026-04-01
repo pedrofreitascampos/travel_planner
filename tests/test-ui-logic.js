@@ -450,6 +450,53 @@ test('buildSharePayload: includes poiTransport', () => {
   assert.strictEqual(payload.poiTransport['poi-1'], 'driving');
 });
 
+// ─── Shortlist ───────────────────────────────────────────────
+
+test('addToShortlist: adds POI to shortlist for current day', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  ctx.addToShortlist('poi-free');
+  assert.ok((ctx.State.shortlist['2026-06-01'] || []).includes('poi-free'));
+});
+
+test('addToShortlist: removes POI from plan when shortlisting', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  assert.ok(ctx.State.plan['2026-06-01'].includes('poi-1'));
+  ctx.addToShortlist('poi-1');
+  assert.ok(!ctx.State.plan['2026-06-01'].includes('poi-1'), 'should be removed from plan');
+  assert.ok(ctx.State.shortlist['2026-06-01'].includes('poi-1'), 'should be in shortlist');
+});
+
+test('promoteFromShortlist: moves POI from shortlist to plan', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  ctx.State.shortlist['2026-06-01'] = ['poi-free'];
+  ctx.promoteFromShortlist('poi-free');
+  assert.ok(!ctx.State.shortlist['2026-06-01'].includes('poi-free'));
+  assert.ok(ctx.State.plan['2026-06-01'].includes('poi-free'));
+});
+
+test('removeFromShortlist: removes POI from shortlist', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  ctx.State.shortlist['2026-06-01'] = ['poi-free'];
+  ctx.removeFromShortlist('poi-free');
+  assert.strictEqual(ctx.State.shortlist['2026-06-01'].length, 0);
+});
+
+test('getPoisAvailableToAdd: excludes shortlisted POIs', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.shortlist['2026-06-01'] = ['poi-free'];
+  const available = ctx.getPoisAvailableToAdd(0);
+  assert.ok(!available.find(p => p.id === 'poi-free'), 'shortlisted POI should not appear in available');
+});
+
 // ─── Copy day POIs ───────────────────────────────────────────
 
 test('copyDayPois: copies POIs to target day', () => {

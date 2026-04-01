@@ -322,6 +322,10 @@ function createTestContext() {
     window.copyDayPois = copyDayPois;
     window.resolveGoogleMapsLink = resolveGoogleMapsLink;
     window.addFromGoogleLink = addFromGoogleLink;
+    window.addToShortlist = addToShortlist;
+    window.promoteFromShortlist = promoteFromShortlist;
+    window.removeFromShortlist = removeFromShortlist;
+    window.isPoiShortlisted = isPoiShortlisted;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });
