@@ -154,9 +154,18 @@ const Auth = {
     badge.id = 'auth-user-badge';
     badge.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:auto;cursor:pointer;';
     badge.title = `${Auth.user.name}\n${Auth.user.email}\nClick to sign out`;
-    badge.innerHTML = Auth.user.picture
-      ? `<img src="${Auth.user.picture}" style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);" referrerpolicy="no-referrer">`
-      : `<div style="width:26px;height:26px;border-radius:50%;background:var(--color-accent);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">${Auth.user.name?.[0] || '?'}</div>`;
+    if (Auth.user.picture) {
+      const img = document.createElement('img');
+      img.setAttribute('src', Auth.user.picture);
+      img.setAttribute('referrerpolicy', 'no-referrer');
+      img.style.cssText = 'width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);';
+      badge.appendChild(img);
+    } else {
+      const avatar = document.createElement('div');
+      avatar.style.cssText = 'width:26px;height:26px;border-radius:50%;background:var(--color-accent);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;';
+      avatar.textContent = Auth.user.name?.[0] || '?';
+      badge.appendChild(avatar);
+    }
     badge.onclick = () => {
       if (confirm('Sign out?')) Auth.signOut();
     };
@@ -2152,13 +2161,23 @@ function renderDayPlanContent(dayIndex) {
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
 
-  // Shortlist for this day
+  // Shortlist for this day (always visible)
   const shortlistIds = State.shortlist[day.date] || [];
-  const shortlistHtml = shortlistIds.length > 0 ? `
+  const copyDayHtml = plan.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;" onchange="App.copyDayPois(${dayIndex}, this.value); this.selectedIndex=0;" title="Copy tour to another day">
+    <option value="">📋 Copy tour →</option>
+    ${State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('')}
+  </select>` : '';
+  const shortlistHtml = `
     <div class="shortlist-section">
-      <div class="shortlist-header">📍 POIs <span class="shortlist-count">${shortlistIds.length}</span></div>
-      <div class="shortlist-list">${shortlistIds.map(id => buildShortlistCardHtml(id)).join('')}</div>
-    </div>` : '';
+      <div class="shortlist-header">
+        📌 Shortlist ${shortlistIds.length > 0 ? `<span class="shortlist-count">${shortlistIds.length}</span>` : ''}
+        ${copyDayHtml}
+      </div>
+      <div class="shortlist-list">${shortlistIds.length > 0
+        ? shortlistIds.map(id => buildShortlistCardHtml(id)).join('')
+        : '<div class="shortlist-empty">Drag POIs here or click 📌 to shortlist places</div>'
+      }</div>
+    </div>`;
 
   const contentHtml = `
     <div class="day-header">
@@ -2200,12 +2219,6 @@ function renderDayPlanContent(dayIndex) {
         ${poiCardsHtml}
       </div>
       ${arriveCardHtml}
-      ${plan.length > 0 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 4px;">
-        <select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;" onchange="App.copyDayPois(${dayIndex}, this.value); this.selectedIndex=0;" title="Copy all POIs to another day">
-          <option value="">📋 Copy day →</option>
-          ${State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('')}
-        </select>
-      </div>` : ''}
       ${shortlistHtml}
       <div class="discover-search-wrap" style="margin-top:8px;">
         <input class="poi-search-input" type="text" placeholder="🔍 Add a place…"
@@ -2385,7 +2398,7 @@ function buildShortlistCardHtml(poiId) {
   return `<div class="shortlist-card" data-poi-id="${poiId}" draggable="true">
     <div class="drag-handle" title="Drag to tour">⠿</div>
     <div class="shortlist-icon">${icon}</div>
-    <div class="shortlist-info">
+    <div class="shortlist-info" onclick="App.openDetail('${esc(poiId)}')" style="cursor:pointer;">
       <div class="shortlist-name">${esc(poi.name)}</div>
       <div class="shortlist-meta">${poi.duration}h · ${poi.costLabel || 'Free'}${poi.rating ? ` · ${'★'.repeat(Math.round(poi.rating))}` : ''}</div>
     </div>

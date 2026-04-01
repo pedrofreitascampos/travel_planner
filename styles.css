@@ -855,13 +855,13 @@ body.modal-open #map {
   padding: 0 4px;
 }
 .shortlist-header {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-text);
   margin-bottom: 4px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .shortlist-count {
   background: var(--color-border);
@@ -883,7 +883,8 @@ body.modal-open #map {
 }
 .shortlist-icon { font-size: 14px; flex-shrink: 0; }
 .shortlist-info { flex: 1; min-width: 0; }
-.shortlist-name { font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shortlist-name { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shortlist-empty { font-size: 11px; color: var(--color-text-secondary); padding: 8px 4px; text-align: center; border: 1px dashed var(--color-border); border-radius: 6px; }
 .shortlist-meta { font-size: 10px; color: var(--color-text-secondary); }
 .btn-shortlist-promote, .btn-shortlist-remove {
   width: 22px; height: 22px; border: 1px solid var(--color-border);
@@ -1529,9 +1530,9 @@ body.modal-open #map {
 }
 .poi-search-input {
   width: 100%; box-sizing: border-box;
-  padding: 8px 12px; border-radius: var(--radius-md);
+  padding: 6px 10px; border-radius: var(--radius-md);
   border: 1.5px solid var(--color-border);
-  font-size: 13px; font-family: inherit;
+  font-size: 12px; font-family: inherit;
   transition: border-color var(--trans-fast);
   background: white;
 }
