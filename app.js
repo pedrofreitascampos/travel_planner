@@ -504,7 +504,7 @@ function getPoisAvailableToAdd(dayIndex) {
   if (!day) return [];
   const inPlan = State.plan[day.date] || [];
   return State.trip.pois.filter(p =>
-    p.availableDays.includes(day.date) && !inPlan.includes(p.id)
+    (p.availableDays || []).includes(day.date) && !inPlan.includes(p.id)
   );
 }
 
@@ -2407,7 +2407,7 @@ function addPoi(poiId) {
   if (!poi) return;
   const day = getDay(State.selectedDayIndex);
   if (!day) return;
-  if (!poi.availableDays.includes(day.date)) {
+  if (!(poi.availableDays || []).includes(day.date)) {
     showToast('Not available on this day');
     return;
   }
