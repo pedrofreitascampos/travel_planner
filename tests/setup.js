@@ -315,6 +315,8 @@ function createTestContext() {
     window.generateDayNarrative = generateDayNarrative;
     window.renderComparisonRadarSVG = renderComparisonRadarSVG;
     window.renderPackingWeatherSummary = renderPackingWeatherSummary;
+    window.OIKUMENE_CAT_MAP = OIKUMENE_CAT_MAP;
+    window.buildOikumeneExport = buildOikumeneExport;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });

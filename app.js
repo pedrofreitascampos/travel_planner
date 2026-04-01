@@ -73,6 +73,23 @@ const Auth = {
   user: null, // { uid, name, email, picture }
 
   init() {
+    // Process redirect result (from signInWithRedirect) — errors surface here
+    firebaseAuth.getRedirectResult().catch(e => {
+      Log.error('auth', 'Redirect sign-in failed', { code: e.code, message: e.message });
+      const msgs = {
+        'auth/unauthorized-domain': `This domain is not authorized for sign-in.\nAdd it to Firebase Console → Authentication → Authorized domains.`,
+        'auth/operation-not-allowed': 'Google sign-in is not enabled.\nEnable it in Firebase Console → Authentication → Sign-in method.',
+      };
+      const msg = msgs[e.code] || `Sign-in failed (${e.code || 'unknown'}):\n${e.message}`;
+      let errEl = document.getElementById('auth-error-msg');
+      if (!errEl) {
+        errEl = document.createElement('div');
+        errEl.id = 'auth-error-msg';
+        errEl.style.cssText = 'color:#f87171;font-size:13px;margin-top:12px;text-align:center;white-space:pre-line;max-width:340px;';
+        document.getElementById('g-signin-btn')?.after(errEl);
+      }
+      errEl.textContent = msg;
+    });
     return new Promise(resolve => {
       firebaseAuth.onAuthStateChanged(user => {
         if (user) {
@@ -116,19 +133,17 @@ const Auth = {
   async signIn() {
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      await firebaseAuth.signInWithPopup(provider);
-      // onAuthStateChanged will handle the rest
+      // Use redirect instead of popup — popup fails when browsers block
+      // third-party cookies (firebaseapp.com ↔ github.io).
+      await firebaseAuth.signInWithRedirect(provider);
     } catch (e) {
-      if (e.code === 'auth/popup-closed-by-user') return;
       Log.error('auth', 'Sign-in failed', { code: e.code, message: e.message });
       const msgs = {
         'auth/unauthorized-domain': `This domain is not authorized for sign-in.\nAdd it to Firebase Console → Authentication → Authorized domains.`,
         'auth/operation-not-allowed': 'Google sign-in is not enabled.\nEnable it in Firebase Console → Authentication → Sign-in method.',
-        'auth/popup-blocked': 'Pop-up was blocked by the browser.\nAllow pop-ups for this site and try again.',
         'auth/internal-error': `Sign-in failed: ${e.message}`,
       };
       const msg = msgs[e.code] || `Sign-in failed (${e.code || 'unknown'}):\n${e.message}`;
-      // Show error below sign-in button
       let errEl = document.getElementById('auth-error-msg');
       if (!errEl) {
         errEl = document.createElement('div');
@@ -5233,6 +5248,13 @@ function injectModals() {
               <div class="share-option-desc">Anyone with the link can open the plan in their browser.</div>
             </div>
           </button>
+          <button class="share-option-btn" onclick="App.exportToOikumene()">
+            <span class="share-option-icon">🗺️</span>
+            <div class="share-option-text">
+              <div class="share-option-label">Export to Oikumene</div>
+              <div class="share-option-desc">Export trip as locations for the History Map. Import via the Oikumene import tab.</div>
+            </div>
+          </button>
         </div>
         <div id="share-link-area" style="display:none">
           <div id="share-status" class="share-status"></div>
@@ -5293,6 +5315,120 @@ function exportPlan() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Plan downloaded');
+}
+
+// ── Oikumene category mapping ──────────────────────────────────
+const OIKUMENE_CAT_MAP = {
+  monument: 'monument', museum: 'museum', food: 'restaurant',
+  bar: 'bar', nature: 'park', park: 'park', beach: 'location',
+  cave: 'location', entertainment: 'event', neighborhood: 'location',
+};
+
+function buildOikumeneExport() {
+  const trip = State.trip;
+  if (!trip) return null;
+
+  const tripId = trip.id;
+  const locations = [];
+
+  // Collect visit dates per POI from the day plan
+  const poiVisitDates = {};
+  for (const [date, poiIds] of Object.entries(State.plan)) {
+    (poiIds || []).forEach(id => {
+      if (!poiVisitDates[id]) poiVisitDates[id] = [];
+      poiVisitDates[id].push(date);
+    });
+  }
+
+  // Export POIs as locations
+  trip.pois.forEach(poi => {
+    if (!poi.lat || !poi.lng) return;
+    const visits = (poiVisitDates[poi.id] || [])
+      .sort()
+      .map(date => ({ date, notes: '' }));
+    locations.push({
+      name: poi.name,
+      lat: poi.lat,
+      lng: poi.lng,
+      category: OIKUMENE_CAT_MAP[poi.category] || 'location',
+      address: poi.description || '',
+      status: visits.length > 0 ? 'been' : 'bucket',
+      googleRating: poi.rating || null,
+      myRating: 0,
+      people: [],
+      visits,
+      notes: poi.notes || '',
+      needsApproval: false,
+      suggestedCategory: null,
+      tags: Array.isArray(poi.tags) ? poi.tags : [],
+      priceLevel: poi.costAmount > 0 ? Math.min(4, Math.ceil(poi.costAmount / 15)) : null,
+      tripId,
+      collections: [],
+      createdAt: visits[0]?.date || trip.startDate || new Date().toISOString().split('T')[0],
+    });
+  });
+
+  // Export accommodations as hotel locations
+  trip.accommodations.forEach(acc => {
+    if (acc.isHome) return;
+    const lat = acc.lat || 0;
+    const lng = acc.lng || 0;
+    if (!lat && !lng) return;
+    const edits = State.accEdits[acc.id] || {};
+    const name = edits.name || acc.name;
+    const visits = (acc.days || []).sort().map(date => ({ date, notes: '' }));
+    const pricePerNight = edits.pricePerNight || 0;
+    locations.push({
+      name,
+      lat, lng,
+      category: 'hotel',
+      address: acc.location || '',
+      status: visits.length > 0 ? 'been' : 'bucket',
+      googleRating: null,
+      myRating: 0,
+      people: [],
+      visits,
+      notes: edits.notes || acc.notes || '',
+      needsApproval: false,
+      suggestedCategory: null,
+      tags: ['accommodation'],
+      priceLevel: pricePerNight > 0 ? Math.min(4, Math.ceil(pricePerNight / 50)) : null,
+      tripId,
+      collections: [],
+      createdAt: visits[0]?.date || trip.startDate || new Date().toISOString().split('T')[0],
+    });
+  });
+
+  return {
+    exportDate: new Date().toISOString(),
+    locations,
+    trips: [{
+      id: tripId,
+      name: trip.name,
+      startDate: trip.startDate || null,
+      endDate: trip.endDate || null,
+      color: trip.coverColor || '#e07b54',
+    }],
+    collections: [],
+  };
+}
+
+function exportToOikumene() {
+  const data = buildOikumeneExport();
+  if (!data) return;
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${State.trip.id}-oikumene.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  const count = data.locations.length;
+  Log.action('Oikumene export', { tripId: State.trip.id, locations: count });
+  showToast(`Exported ${count} location${count !== 1 ? 's' : ''} for Oikumene`);
 }
 
 async function generateShareLink() {
@@ -5553,6 +5689,7 @@ window.App = {
   accLocationSearch,
   selectAccLocation,
   exportPlan,
+  exportToOikumene,
   generateShareLink,
   copyShareLink,
   openShareModal,

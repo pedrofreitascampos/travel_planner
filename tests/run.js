@@ -14,6 +14,7 @@ const testFiles = [
   './test-persistence.js',
   './test-routing.js',
   './test-ui-logic.js',
+  './test-oikumene-export.js',
 ];
 
 let totalPass = 0;
