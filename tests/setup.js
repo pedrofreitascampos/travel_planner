@@ -323,6 +323,7 @@ function createTestContext() {
     window.resolveGoogleMapsLink = resolveGoogleMapsLink;
     window.addFromGoogleLink = addFromGoogleLink;
     window.addToShortlist = addToShortlist;
+    window.reorderPlan = reorderPlan;
     window.promoteFromShortlist = promoteFromShortlist;
     window.removeFromShortlist = removeFromShortlist;
     window.isPoiShortlisted = isPoiShortlisted;

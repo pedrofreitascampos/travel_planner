@@ -392,6 +392,53 @@ test('getPoisAvailableToAdd: does not crash when POI has undefined availableDays
   assert.ok(!available.find(p => p.id === 'poi-broken'), 'POI without availableDays should not appear');
 });
 
+// ─── Drag-drop cross-section (promote/demote) ──────────────
+
+test('promoteFromShortlist: recalculates plan correctly after promote', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  // Move poi-free to shortlist first
+  ctx.State.shortlist['2026-06-01'] = ['poi-free'];
+  // Verify it's not in plan
+  assert.ok(!ctx.State.plan['2026-06-01'].includes('poi-free'));
+  // Promote
+  ctx.promoteFromShortlist('poi-free');
+  assert.ok(ctx.State.plan['2026-06-01'].includes('poi-free'), 'should be in plan after promote');
+  assert.ok(!ctx.State.shortlist['2026-06-01'].includes('poi-free'), 'should be removed from shortlist');
+});
+
+test('addToShortlist: removes from plan and adds to shortlist', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  assert.ok(ctx.State.plan['2026-06-01'].includes('poi-2'));
+  ctx.addToShortlist('poi-2');
+  assert.ok(!ctx.State.plan['2026-06-01'].includes('poi-2'), 'should be removed from plan');
+  assert.ok(ctx.State.shortlist['2026-06-01'].includes('poi-2'), 'should be in shortlist');
+});
+
+test('addToShortlist: does not duplicate if already shortlisted', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.selectedDayIndex = 0;
+  ctx.State.shortlist['2026-06-01'] = ['poi-free'];
+  ctx.addToShortlist('poi-free');
+  const count = ctx.State.shortlist['2026-06-01'].filter(id => id === 'poi-free').length;
+  assert.strictEqual(count, 1);
+});
+
+test('reorderPlan: swaps POI positions in plan', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  // Day 0 plan: ['poi-1', 'poi-2']
+  assert.strictEqual(ctx.State.plan['2026-06-01'][0], 'poi-1');
+  assert.strictEqual(ctx.State.plan['2026-06-01'][1], 'poi-2');
+  ctx.reorderPlan(0, 'poi-2', 'poi-1');
+  assert.strictEqual(ctx.State.plan['2026-06-01'][0], 'poi-2');
+  assert.strictEqual(ctx.State.plan['2026-06-01'][1], 'poi-1');
+});
+
 test('addPoi: does not crash when POI has undefined availableDays', () => {
   const ctx = createTestContext();
   installMockTrip(ctx);
