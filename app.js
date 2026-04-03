@@ -2161,23 +2161,13 @@ function renderDayPlanContent(dayIndex) {
   const available = getPoisAvailableToAdd(dayIndex);
   const addMoreHtml = available.map(poi => buildAddCardHtml(poi)).join('');
 
-  // Shortlist for this day (always visible)
-  const shortlistIds = State.shortlist[day.date] || [];
-  const copyDayHtml = plan.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;" onchange="App.copyDayPois(${dayIndex}, this.value); this.selectedIndex=0;" title="Copy tour to another day">
-    <option value="">📋 Copy tour →</option>
-    ${State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('')}
-  </select>` : '';
-  const shortlistHtml = `
-    <div class="shortlist-section">
-      <div class="shortlist-header">
-        📌 Shortlist ${shortlistIds.length > 0 ? `<span class="shortlist-count">${shortlistIds.length}</span>` : ''}
-        ${copyDayHtml}
-      </div>
-      <div class="shortlist-list">${shortlistIds.length > 0
-        ? shortlistIds.map(id => buildShortlistCardHtml(id)).join('')
-        : '<div class="shortlist-empty">Drag POIs here or click 📌 to shortlist places</div>'
-      }</div>
-    </div>`;
+  // Watchlist for this day (always visible)
+  const watchlistIds = State.shortlist[day.date] || [];
+  const daySelectOpts = State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('');
+  const tourCopyHtml = plan.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;margin-left:auto;" onchange="App.copyDayPois(${dayIndex}, this.value, 'tour'); this.selectedIndex=0;" title="Copy tour to another day">
+    <option value="">📋 Copy →</option>${daySelectOpts}</select>` : '';
+  const watchlistCopyHtml = watchlistIds.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;margin-left:auto;" onchange="App.copyDayPois(${dayIndex}, this.value, 'watchlist'); this.selectedIndex=0;" title="Copy watchlist to another day">
+    <option value="">📋 Copy →</option>${daySelectOpts}</select>` : '';
 
   const contentHtml = `
     <div class="day-header">
@@ -2214,14 +2204,35 @@ function renderDayPlanContent(dayIndex) {
     <div class="day-tab-panel" data-panel="plan">
       ${generateDayNarrative(dayIndex, plan, hasInterCity, depCity, arrCity)}
       <div class="route-summary"><span style="font-size:11px;color:var(--color-text-light);">Calculating route…</span></div>
-      ${departCardHtml}
-      <div class="poi-list" data-day="${dayIndex}">
-        ${poiCardsHtml}
+
+      <!-- Tour Section -->
+      <div class="tour-section">
+        <div class="section-header">
+          🗺 Tour ${plan.length > 0 ? `<span class="section-count">${plan.length}</span>` : ''}
+          ${tourCopyHtml}
+        </div>
+        ${departCardHtml}
+        <div class="poi-list" data-day="${dayIndex}">
+          ${poiCardsHtml}
+        </div>
+        ${arriveCardHtml}
       </div>
-      ${arriveCardHtml}
-      ${shortlistHtml}
-      <div class="discover-search-wrap" style="margin-top:8px;">
-        <input class="poi-search-input" type="text" placeholder="🔍 Add a place…"
+
+      <!-- Watchlist Section -->
+      <div class="watchlist-section">
+        <div class="watchlist-header">
+          📌 Watchlist ${watchlistIds.length > 0 ? `<span class="section-count">${watchlistIds.length}</span>` : ''}
+          ${watchlistCopyHtml}
+        </div>
+        <div class="watchlist-list">${watchlistIds.length > 0
+          ? watchlistIds.map(id => buildShortlistCardHtml(id)).join('')
+          : '<div class="watchlist-empty">Drag POIs here or click 📌 to add to watchlist</div>'
+        }</div>
+      </div>
+
+      <!-- Search -->
+      <div class="discover-search-wrap" style="margin-top:4px;">
+        <input class="poi-search-input" type="text" placeholder="🔍 Search or paste Google Maps link…"
           oninput="App.searchPois(this, ${dayIndex})">
       </div>
       <div class="search-results-host"></div>
@@ -2303,7 +2314,7 @@ function renderDayPlanContent(dayIndex) {
     initDragDrop(poiList);
     initTouchDrag(poiList);
     // Init drag/drop on shortlist section too
-    const shortlistList = el.querySelector('.shortlist-list');
+    const shortlistList = el.querySelector('.watchlist-list');
     if (shortlistList) {
       initDragDrop(shortlistList);
       initTouchDrag(shortlistList);
@@ -2395,12 +2406,12 @@ function buildShortlistCardHtml(poiId) {
   if (!poi) return '';
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
   const icon = poi.emoji || cat.icon;
-  return `<div class="shortlist-card" data-poi-id="${poiId}" draggable="true">
+  return `<div class="watchlist-card" data-poi-id="${poiId}" draggable="true">
     <div class="drag-handle" title="Drag to tour">⠿</div>
-    <div class="shortlist-icon">${icon}</div>
-    <div class="shortlist-info" onclick="App.openDetail('${esc(poiId)}')" style="cursor:pointer;">
-      <div class="shortlist-name">${esc(poi.name)}</div>
-      <div class="shortlist-meta">${poi.duration}h · ${poi.costLabel || 'Free'}${poi.rating ? ` · ${'★'.repeat(Math.round(poi.rating))}` : ''}</div>
+    <div class="watchlist-icon">${icon}</div>
+    <div class="watchlist-info" onclick="App.openDetail('${esc(poiId)}')" style="cursor:pointer;">
+      <div class="watchlist-name">${esc(poi.name)}</div>
+      <div class="watchlist-meta">${poi.duration}h · ${poi.costLabel || 'Free'}${poi.rating ? ` · ${'★'.repeat(Math.round(poi.rating))}` : ''}</div>
     </div>
     <button class="btn-shortlist-promote" onclick="App.promoteFromShortlist('${esc(poiId)}')" title="Add to tour">▲</button>
     <button class="btn-shortlist-remove" onclick="App.removeFromShortlist('${esc(poiId)}')" title="Remove">✕</button>
@@ -2440,7 +2451,7 @@ function initDragDrop(listEl) {
     const card = e.target.closest('[draggable][data-poi-id]');
     if (!card) return;
     _dragSrcId = card.dataset.poiId;
-    _dragSrcSection = card.closest('.shortlist-list') ? 'shortlist' : 'tour';
+    _dragSrcSection = card.closest('.watchlist-list') ? 'shortlist' : 'tour';
     card.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
   });
@@ -2466,8 +2477,8 @@ function initDragDrop(listEl) {
     if (!_dragSrcId) return;
     // Determine drop target: check both the list itself and if we dropped on a card in the other section
     const dropCard = e.target.closest('[data-poi-id]');
-    const dropList = dropCard?.closest('.shortlist-list') || dropCard?.closest('.poi-list') || listEl;
-    const dropSection = dropList.classList.contains('shortlist-list') ? 'shortlist' : 'tour';
+    const dropList = dropCard?.closest('.watchlist-list') || dropCard?.closest('.poi-list') || listEl;
+    const dropSection = dropList.classList.contains('watchlist-list') ? 'shortlist' : 'tour';
 
     if (_dragSrcSection === 'tour' && dropSection === 'tour') {
       const tgtId = dropCard?.dataset.poiId;
@@ -2503,7 +2514,7 @@ function initTouchDrag(listEl) {
     origCard = handle.closest('[draggable][data-poi-id]');
     if (!origCard) return;
     srcId = origCard.dataset.poiId;
-    srcSection = origCard.closest('.shortlist-list') ? 'shortlist' : 'tour';
+    srcSection = origCard.closest('.watchlist-list') ? 'shortlist' : 'tour';
     lastY = e.touches[0].clientY;
     origCard.style.opacity = '0.4';
 
@@ -2549,7 +2560,7 @@ function initTouchDrag(listEl) {
     else listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
 
     const tgtCard = underEl?.closest('[data-poi-id]');
-    const dropSection = tgtCard?.closest('.shortlist-list') ? 'shortlist' : 'tour';
+    const dropSection = tgtCard?.closest('.watchlist-list') ? 'shortlist' : 'tour';
 
     if (tgtCard && srcId) {
       if (srcSection === 'tour' && dropSection === 'tour' && tgtCard.dataset.poiId !== srcId) {
@@ -3490,24 +3501,28 @@ function isPoiShortlisted(poiId, date) {
   return (State.shortlist[date] || []).includes(poiId);
 }
 
-function copyDayPois(fromDayIndex, toDate) {
+function copyDayPois(fromDayIndex, toDate, source) {
   if (!toDate || !State.trip) return;
+  source = source || 'tour';
   const fromDay = getDay(fromDayIndex);
   if (!fromDay) return;
-  const fromPois = State.plan[fromDay.date] || [];
-  if (fromPois.length === 0) return;
-  if (!State.plan[toDate]) State.plan[toDate] = [];
+  const fromIds = source === 'watchlist'
+    ? (State.shortlist[fromDay.date] || [])
+    : (State.plan[fromDay.date] || []);
+  if (fromIds.length === 0) return;
+  const target = source === 'watchlist' ? State.shortlist : State.plan;
+  if (!target[toDate]) target[toDate] = [];
   let copied = 0;
-  fromPois.forEach(id => {
-    if (!State.plan[toDate].includes(id)) {
-      State.plan[toDate].push(id);
+  fromIds.forEach(id => {
+    if (!target[toDate].includes(id)) {
+      target[toDate].push(id);
       copied++;
     }
   });
   if (copied === 0) { showToast('All POIs already on that day'); return; }
   Storage.save();
-  Log.action('Day POIs copied', { from: fromDay.date, to: toDate, count: copied });
-  showToast(`Copied ${copied} POI${copied !== 1 ? 's' : ''} to ${formatShortDate(toDate)}`);
+  Log.action('Day POIs copied', { from: fromDay.date, to: toDate, source, count: copied });
+  showToast(`Copied ${copied} ${source === 'watchlist' ? 'watchlist' : 'tour'} POI${copied !== 1 ? 's' : ''} to ${formatShortDate(toDate)}`);
 }
 
 function addFromGoogleLink(id, name, lat, lng, dayIndex) {

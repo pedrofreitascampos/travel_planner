@@ -849,29 +849,69 @@ body.modal-open #map {
 .poi-stars { font-size: 10px; color: #f0c040; letter-spacing: 0.3px; line-height: 1; }
 .poi-my-rating { color: #ff8a00; }
 
-/* ─── Shortlist Section ──────────────────────────────────────── */
-.shortlist-section {
-  margin-top: 8px;
-  padding: 0 4px;
-}
-.shortlist-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text);
-  margin-bottom: 4px;
+/* ─── Section Headers (Tour + Watchlist) ─────────────────────── */
+.section-header {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-sidebar-bg, #fff);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  user-select: none;
 }
-.shortlist-count {
+.section-count {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+.section-header .btn-move-day { margin-left: auto; }
+
+/* ─── Tour Section ───────────────────────────────────────────── */
+.tour-section {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin: 4px;
+  overflow: hidden;
+}
+.tour-section .poi-list { padding: 4px; }
+
+/* ─── Watchlist Section ──────────────────────────────────────── */
+.watchlist-section {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  margin: 4px;
+  overflow: hidden;
+}
+.watchlist-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--color-card-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+.section-count {
   background: var(--color-border);
   color: var(--color-text-secondary);
   font-size: 10px;
   padding: 0 5px;
   border-radius: 8px;
 }
-.shortlist-list { display: flex; flex-direction: column; gap: 3px; }
-.shortlist-card {
+.watchlist-list { display: flex; flex-direction: column; gap: 3px; }
+.watchlist-card {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -881,11 +921,11 @@ body.modal-open #map {
   border-radius: 6px;
   font-size: 11px;
 }
-.shortlist-icon { font-size: 14px; flex-shrink: 0; }
-.shortlist-info { flex: 1; min-width: 0; }
-.shortlist-name { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.shortlist-empty { font-size: 11px; color: var(--color-text-secondary); padding: 8px 4px; text-align: center; border: 1px dashed var(--color-border); border-radius: 6px; }
-.shortlist-meta { font-size: 10px; color: var(--color-text-secondary); }
+.watchlist-icon { font-size: 14px; flex-shrink: 0; }
+.watchlist-info { flex: 1; min-width: 0; }
+.watchlist-name { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.watchlist-empty { font-size: 11px; color: var(--color-text-secondary); padding: 8px 4px; text-align: center; border: 1px dashed var(--color-border); border-radius: 6px; }
+.watchlist-meta { font-size: 10px; color: var(--color-text-secondary); }
 .btn-shortlist-promote, .btn-shortlist-remove {
   width: 22px; height: 22px; border: 1px solid var(--color-border);
   border-radius: 4px; background: none; cursor: pointer; font-size: 10px;
@@ -2655,7 +2695,7 @@ button:focus-visible, select:focus-visible, input:focus-visible {
 
   /* Cards & inputs */
   .poi-card { background: var(--color-card-bg); border-color: var(--color-border); }
-  .shortlist-card { background: rgba(255,255,255,0.05); border-color: var(--color-border); }
+  .watchlist-card { background: rgba(255,255,255,0.05); border-color: var(--color-border); }
   .add-poi-card { background: var(--color-card-bg); border-color: var(--color-border); }
   .transport-card { background: var(--color-card-bg); border-color: var(--color-border); }
   .acc-card { background: var(--color-card-bg); border-color: var(--color-border); }
