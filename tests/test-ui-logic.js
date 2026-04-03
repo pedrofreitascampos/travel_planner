@@ -566,6 +566,53 @@ test('getPoisAvailableToAdd: excludes shortlisted POIs', () => {
   assert.ok(!available.find(p => p.id === 'poi-free'), 'shortlisted POI should not appear in available');
 });
 
+// ─── Watchlist priority ──────────────────────────────────────
+
+test('getWatchlistPriority: defaults to 2', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  assert.strictEqual(ctx.getWatchlistPriority('poi-1'), 2);
+});
+
+test('cycleWatchlistPriority: cycles 2 → 3 → 1 → 2', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  assert.strictEqual(ctx.getWatchlistPriority('poi-1'), 2);
+  ctx.cycleWatchlistPriority('poi-1');
+  assert.strictEqual(ctx.getWatchlistPriority('poi-1'), 3);
+  ctx.cycleWatchlistPriority('poi-1');
+  assert.strictEqual(ctx.getWatchlistPriority('poi-1'), 1);
+  ctx.cycleWatchlistPriority('poi-1');
+  assert.strictEqual(ctx.getWatchlistPriority('poi-1'), 2);
+});
+
+// ─── Auto transport mode detection ──────────────────────────
+
+test('getEffectiveLegMode: returns foot for short distance', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  // Two points ~0.5km apart
+  const result = ctx.getEffectiveLegMode([38.71, -9.14], [38.715, -9.14], 'poi-1');
+  assert.strictEqual(result, 'foot');
+});
+
+test('getEffectiveLegMode: returns driving for long distance', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  // Two points ~20km apart
+  const result = ctx.getEffectiveLegMode([38.69, -9.22], [38.80, -9.39], 'poi-1');
+  assert.strictEqual(result, 'driving');
+});
+
+test('getEffectiveLegMode: explicit override takes precedence', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  ctx.State.poiTransport['poi-1'] = 'foot';
+  // Long distance but explicit foot override
+  const result = ctx.getEffectiveLegMode([38.69, -9.22], [38.80, -9.39], 'poi-1');
+  assert.strictEqual(result, 'foot');
+});
+
 // ─── Copy day POIs ───────────────────────────────────────────
 
 test('copyDayPois: copies POIs to target day', () => {

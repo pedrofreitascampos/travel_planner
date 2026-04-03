@@ -342,6 +342,7 @@ const State = {
   dayLabels: {},          // 'YYYY-MM-DD' → custom label string
   dayEmojis: {},          // 'YYYY-MM-DD' → custom emoji
   poiTransport: {},       // 'poi-id' → 'driving' (default is foot — only overrides stored)
+  watchlistPriority: {},  // 'poi-id' → 1|2|3 (priority rating, default 2)
   customMarkerMode: false, // true when user is dropping a custom pin
   pendingMarkerLatLng: null, // {lat, lng} of pending custom marker
 };
@@ -364,6 +365,7 @@ const Storage = {
       dayEmojis: State.dayEmojis,
       poiTransport: State.poiTransport,
       shortlist: State.shortlist,
+      watchlistPriority: State.watchlistPriority,
     });
   },
   saveParty() {
@@ -2249,10 +2251,19 @@ function renderDayPlanContent(dayIndex) {
       <div class="watchlist-section">
         <div class="watchlist-header">
           📌 Watchlist ${watchlistIds.length > 0 ? `<span class="section-count">${watchlistIds.length}</span>` : ''}
+          ${watchlistIds.length > 1 ? `<select class="watchlist-filter" onchange="App.filterWatchlist(this.value)" style="font-size:10px;padding:1px 4px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-card-bg);color:var(--color-text-secondary);">
+            <option value="all">All</option>
+            ${[...new Set(watchlistIds.map(id => getPoi(id)?.category).filter(Boolean))].map(c =>
+              `<option value="${c}">${(CATEGORIES[c]?.icon || '📍')} ${CATEGORIES[c]?.label || c}</option>`
+            ).join('')}
+          </select>` : ''}
           ${watchlistCopyHtml}
         </div>
         <div class="watchlist-list">${watchlistIds.length > 0
-          ? watchlistIds.map(id => buildShortlistCardHtml(id)).join('')
+          ? watchlistIds
+              .slice()
+              .sort((a, b) => (getWatchlistPriority(b)) - (getWatchlistPriority(a)))
+              .map(id => buildShortlistCardHtml(id)).join('')
           : '<div class="watchlist-empty">Drag POIs here or click 📌 to add to watchlist</div>'
         }</div>
       </div>
@@ -2434,8 +2445,12 @@ function buildShortlistCardHtml(poiId) {
   if (!poi) return '';
   const cat = CATEGORIES[poi.category] || CATEGORIES.monument;
   const icon = poi.emoji || cat.icon;
-  return `<div class="watchlist-card" data-poi-id="${poiId}" draggable="true">
+  const priority = getWatchlistPriority(poiId);
+  const priorityIcons = { 1: '🔹', 2: '🔸', 3: '⭐' };
+  const priorityTitles = { 1: 'Low priority (click to cycle)', 2: 'Medium priority (click to cycle)', 3: 'High priority (click to cycle)' };
+  return `<div class="watchlist-card watchlist-priority-${priority}" data-poi-id="${poiId}" data-category="${poi.category}" draggable="true">
     <div class="drag-handle" title="Drag to tour">⠿</div>
+    <button class="watchlist-priority-btn" onclick="event.stopPropagation(); App.cycleWatchlistPriority('${esc(poiId)}')" title="${priorityTitles[priority]}">${priorityIcons[priority]}</button>
     <div class="watchlist-icon">${icon}</div>
     <div class="watchlist-info" onclick="App.openDetail('${esc(poiId)}')" style="cursor:pointer;">
       <div class="watchlist-name">${esc(poi.name)}</div>
@@ -3525,6 +3540,27 @@ function promoteFromShortlist(poiId) {
   renderDayPlanContent(State.selectedDayIndex);
   drawRoute(State.selectedDayIndex);
   showToast(`"${poi?.name}" added to tour`);
+}
+
+function filterWatchlist(category) {
+  document.querySelectorAll('.watchlist-card').forEach(card => {
+    if (category === 'all' || card.dataset.category === category) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function cycleWatchlistPriority(poiId) {
+  const current = State.watchlistPriority[poiId] || 2;
+  State.watchlistPriority[poiId] = current >= 3 ? 1 : current + 1;
+  Storage.save();
+  renderDayPlanContent(State.selectedDayIndex);
+}
+
+function getWatchlistPriority(poiId) {
+  return State.watchlistPriority[poiId] || 2;
 }
 
 function removeFromShortlist(poiId) {
@@ -5554,6 +5590,7 @@ async function loadTrip(tripId) {
     State.dayEmojis = saved.dayEmojis ?? {};
     State.poiTransport = saved.poiTransport ?? {};
     State.shortlist = saved.shortlist ?? {};
+    State.watchlistPriority = saved.watchlistPriority ?? {};
   } else {
     State.plan = {};
     Object.entries(trip.defaultDayPlans).forEach(([d, ids]) => { State.plan[d] = [...ids]; });
@@ -5565,6 +5602,7 @@ async function loadTrip(tripId) {
     State.dayEmojis = {};
     State.poiTransport = {};
     State.shortlist = {};
+    State.watchlistPriority = {};
   }
 
   // Load party config and settings
@@ -6333,6 +6371,8 @@ window.App = {
   addToShortlist,
   promoteFromShortlist,
   removeFromShortlist,
+  cycleWatchlistPriority,
+  filterWatchlist,
   discoverNearby,
   discoverAlongRoute,
   discoverEvents,

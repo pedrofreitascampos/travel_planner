@@ -330,6 +330,9 @@ function createTestContext() {
     window.promoteFromShortlist = promoteFromShortlist;
     window.removeFromShortlist = removeFromShortlist;
     window.isPoiShortlisted = isPoiShortlisted;
+    window.cycleWatchlistPriority = cycleWatchlistPriority;
+    window.getWatchlistPriority = getWatchlistPriority;
+    window.getEffectiveLegMode = getEffectiveLegMode;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });
