@@ -1698,69 +1698,54 @@ async function drawRoute(dayIndex) {
       const poiIds = plan.map(id => getPoi(id)).filter(Boolean);
       const dayMode = getEffectiveRouteMode(day.date);
 
-      // Build legs: [from, to, mode] — acc → POI1 → POI2 → ... → acc
-      const legs = [];
+      // Build per-leg routes: each leg = [fromPoint, toPoint, mode]
+      // Mode is determined by the destination POI's transport setting
       const allPoints = [...poiWaypoints];
-      const allModes = poiIds.map(p => getPoiTransportMode(p.id));
+      const poiModes = poiIds.map(p => getPoiTransportMode(p.id));
 
-      // Add acc as start if driving to first POI
-      if (arrCoords?.lat && arrCoords?.lng && allModes[0] === 'driving') {
-        allPoints.unshift([arrCoords.lat, arrCoords.lng]);
-        allModes.unshift('driving'); // placeholder — mode is for destination
-      }
-      // Add acc as end if driving back from last POI
-      if (arrCoords?.lat && arrCoords?.lng && allModes[allModes.length - 1] === 'driving') {
-        allPoints.push([arrCoords.lat, arrCoords.lng]);
+      // Optionally add acc as start/end for driving legs
+      if (arrCoords?.lat && arrCoords?.lng) {
+        if (poiModes[0] === 'driving') {
+          allPoints.unshift([arrCoords.lat, arrCoords.lng]);
+          poiModes.unshift('driving');
+        }
+        if (poiModes[poiModes.length - 1] === 'driving') {
+          allPoints.push([arrCoords.lat, arrCoords.lng]);
+        }
       }
 
-      // Group consecutive waypoints by mode to minimise OSRM calls
+      // Route each consecutive pair with the destination's mode
       let totalDistKm = 0, totalDurMin = 0;
       const layers = [];
-      let legStart = 0;
-      for (let i = 1; i <= allPoints.length; i++) {
-        // Determine this leg's mode: mode of the destination POI
-        const legMode = allModes[Math.min(i, allModes.length - 1)] || dayMode;
-        const nextMode = i < allPoints.length ? (allModes[Math.min(i + 1, allModes.length - 1)] || dayMode) : null;
-        const modeChanges = nextMode !== null && nextMode !== legMode;
-        const isLast = i === allPoints.length;
 
-        if (modeChanges || isLast) {
-          const legPoints = allPoints.slice(legStart, i + (isLast ? 0 : 1));
-          if (legPoints.length >= 2) {
-            const result = await fetchRoute(legPoints, legMode);
+      // Group consecutive same-mode segments to reduce OSRM calls
+      let segStart = 0;
+      let segMode = poiModes[0] || dayMode;
+      for (let i = 1; i <= allPoints.length; i++) {
+        const nextMode = i < poiModes.length ? poiModes[i] : null;
+        const isLast = i >= allPoints.length - 1;
+        // Flush segment when mode changes or we've reached the end
+        if (nextMode !== segMode || isLast) {
+          const endIdx = isLast ? allPoints.length : i + 1;
+          const segPoints = allPoints.slice(segStart, endIdx);
+          if (segPoints.length >= 2) {
+            const result = await fetchRoute(segPoints, segMode);
             if (gen !== _inCityRouteGen) return;
             if (result) {
               totalDistKm += result.distKm;
               totalDurMin += result.durMin;
-              const routeStyle = legMode === 'foot'
+              const routeStyle = segMode === 'foot'
                 ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
                 : { color: '#2e7d32', weight: 4, opacity: 0.8, dashArray: null };
               if (result.geojson) {
                 layers.push(L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map));
               } else {
-                layers.push(L.polyline(legPoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map));
+                layers.push(L.polyline(segPoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map));
               }
             }
           }
-          legStart = i;
-        }
-      }
-
-      // Fallback: if grouping produced no legs, route everything with day mode
-      if (layers.length === 0 && allPoints.length >= 2) {
-        const result = await fetchRoute(allPoints, dayMode);
-        if (gen !== _inCityRouteGen) return;
-        if (result) {
-          totalDistKm = result.distKm;
-          totalDurMin = result.durMin;
-          const routeStyle = dayMode === 'foot'
-            ? { color: '#1565c0', weight: 3, opacity: 0.8, dashArray: '8,4' }
-            : { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: null };
-          if (result.geojson) {
-            layers.push(L.geoJSON(result.geojson, { style: routeStyle }).addTo(State.map));
-          } else {
-            layers.push(L.polyline(allPoints, { ...routeStyle, opacity: 0.6, dashArray: '6,6' }).addTo(State.map));
-          }
+          segStart = i;
+          segMode = nextMode || dayMode;
         }
       }
 
