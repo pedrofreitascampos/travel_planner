@@ -607,6 +607,42 @@ test('resolveGoogleMapsLink: parses query URL with coords', async () => {
   assert.strictEqual(result.lng, -9.216);
 });
 
+test('resolveGoogleMapsLink: returns shortLink marker for goo.gl URL', async () => {
+  const ctx = createTestContext();
+  const result = await ctx.resolveGoogleMapsLink('https://maps.app.goo.gl/ABC123');
+  assert.ok(result.shortLink, 'should be marked as short link');
+  assert.strictEqual(result.url, 'https://maps.app.goo.gl/ABC123');
+});
+
+// ─── Google Calendar URL ─────────────────────────────────────
+
+test('buildCalendarUrl: generates valid Google Calendar URL', () => {
+  const ctx = createTestContext();
+  const poi = { name: 'Test POI', lat: 38.7, lng: -9.1, duration: 2, bookingTime: '14:00', bookingRef: 'REF123', description: 'A place', gmapsUrl: 'https://maps.google.com' };
+  const url = ctx.buildCalendarUrl(poi, '2026-06-01');
+  assert.ok(url.includes('calendar.google.com'), 'should be Google Calendar URL');
+  assert.ok(url.includes('Test+POI') || url.includes('Test%20POI'), 'should include POI name');
+  assert.ok(url.includes('20260601T140000'), 'should include start time');
+  assert.ok(url.includes('20260601T160000'), 'should include end time (2h later)');
+});
+
+test('buildCalendarUrl: defaults to 10:00 when no booking time', () => {
+  const ctx = createTestContext();
+  const poi = { name: 'No Time', lat: 38.7, lng: -9.1, duration: 1.5 };
+  const url = ctx.buildCalendarUrl(poi, '2026-06-01');
+  assert.ok(url.includes('20260601T100000'), 'should default to 10:00');
+  assert.ok(url.includes('20260601T113000'), 'should end at 11:30');
+});
+
+// ─── Theme ───────────────────────────────────────────────────
+
+test('THEME_CYCLE: cycles auto → dark → light → auto', () => {
+  const ctx = createTestContext();
+  assert.strictEqual(ctx.THEME_CYCLE.auto, 'dark');
+  assert.strictEqual(ctx.THEME_CYCLE.dark, 'light');
+  assert.strictEqual(ctx.THEME_CYCLE.light, 'auto');
+});
+
 test('resolveGoogleMapsLink: returns null for non-Maps URL', async () => {
   const ctx = createTestContext();
   const result = await ctx.resolveGoogleMapsLink('https://example.com');

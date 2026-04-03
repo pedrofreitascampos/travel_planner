@@ -812,7 +812,13 @@ body.modal-open #map {
 .badge-category  { background: var(--color-card-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
 
 /* ─── POI Actions ─────────────────────────────────────────────── */
-.poi-actions { display: flex; flex-wrap: wrap; gap: 2px; flex-shrink: 0; max-width: 54px; justify-content: flex-end; }
+.poi-actions { display: flex; gap: 2px; flex-shrink: 0; align-items: center; }
+.poi-overflow-btn {
+  display: none; background: none; border: 1px solid var(--color-border);
+  border-radius: 4px; font-size: 14px; line-height: 1; padding: 2px 6px;
+  cursor: pointer; color: var(--color-text-secondary); flex-shrink: 0;
+}
+.poi-overflow-btn:hover { background: var(--color-accent-light); }
 
 .btn-icon {
   width: 24px;
@@ -2568,6 +2574,17 @@ body.modal-open #map {
   .route-mode-btn { min-height: 40px; padding: 8px; }
   #sheet-handle { min-height: 44px; display: flex; align-items: center; justify-content: center; }
 
+  /* ─── Compact mobile POI cards ─────────────────────────── */
+  .poi-card { padding: 3px 4px; }
+  .poi-card .poi-thumb { display: none; }
+  .poi-card .poi-ratings { display: none; }
+  .poi-card .poi-actions { display: none; }
+  .poi-overflow-btn { display: flex; align-items: center; }
+  .poi-card.expanded .poi-thumb { display: flex; }
+  .poi-card.expanded .poi-ratings { display: flex; }
+  .poi-card.expanded .poi-actions { display: flex; flex-wrap: wrap; }
+  .poi-card.expanded .poi-overflow-btn { display: none; }
+
   /* ─── Tap feedback (:active states) ────────────────────── */
   .poi-card:active { background: var(--color-accent-light); border-color: var(--color-accent); }
   .btn-icon:active { opacity: 0.6; transform: scale(0.9); }
@@ -2768,3 +2785,55 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .packing-temp-fill { background: var(--color-sidebar-bg); }
   .packing-item { color: var(--color-text); }
 }
+
+/* Manual dark theme override */
+[data-theme="dark"] {
+  --color-header: #0f0f1a;
+  --color-accent: #e8956e;
+  --color-accent-hover: #d4805a;
+  --color-accent-light: #3a2a22;
+  --color-sidebar-bg: #1a1a2e;
+  --color-text: #e0e0e0;
+  --color-text-secondary: #999;
+  --color-text-light: #777;
+  --color-border: #333;
+  --color-card-bg: #22223a;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+}
+[data-theme="dark"] html, [data-theme="dark"] body, html[data-theme="dark"] body { background: #111; }
+[data-theme="dark"] #sidebar,
+[data-theme="dark"] #bottom-sheet,
+[data-theme="dark"] #poi-detail,
+[data-theme="dark"] .modal-panel { background: var(--color-sidebar-bg); color: var(--color-text); }
+[data-theme="dark"] .poi-card,
+[data-theme="dark"] .watchlist-card,
+[data-theme="dark"] .add-poi-card,
+[data-theme="dark"] .acc-card,
+[data-theme="dark"] .drive-info { background: var(--color-card-bg); border-color: var(--color-border); }
+[data-theme="dark"] .settings-input,
+[data-theme="dark"] select,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] textarea { background: var(--color-card-bg); color: var(--color-text); border-color: var(--color-border); }
+[data-theme="dark"] .day-narrative { background: #2a2018; border-left-color: var(--color-accent); color: #bbb; }
+[data-theme="dark"] .poi-search-input { background: var(--color-card-bg); color: var(--color-text); }
+
+/* Manual light theme override — forces light even if OS prefers dark */
+[data-theme="light"] {
+  --color-header: #1a1a2e;
+  --color-accent: #e07b54;
+  --color-accent-hover: #c96b47;
+  --color-accent-light: #fdf0eb;
+  --color-sidebar-bg: #ffffff;
+  --color-text: #1a1a2e;
+  --color-text-secondary: #666;
+  --color-text-light: #999;
+  --color-border: #e8e8e8;
+  --color-card-bg: #f8f8f8;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+}
+[data-theme="light"] html, [data-theme="light"] body, html[data-theme="light"] body { background: #f5f5f5; }
+[data-theme="light"] .poi-card,
+[data-theme="light"] .add-poi-card,
+[data-theme="light"] .acc-card { background: white; }
+[data-theme="light"] .poi-search-input { background: white; }

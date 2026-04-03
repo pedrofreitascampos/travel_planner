@@ -559,9 +559,18 @@ function showToast(msg, ms = 2500) {
 }
 
 // ─── Wikipedia Thumbnail ───────────────────────────────────────
+const _wikiCache = {}; // title → { thumb, extract }
+
 async function fetchThumb(title) {
   if (!title) return null;
   if (State.thumbnailCache[title] !== undefined) return State.thumbnailCache[title];
+  const data = await fetchWikiSummary(title);
+  return data?.thumb || null;
+}
+
+async function fetchWikiSummary(title) {
+  if (!title) return null;
+  if (_wikiCache[title] !== undefined) return _wikiCache[title];
   const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
   const t0 = Date.now();
   try {
@@ -572,14 +581,43 @@ async function fetchThumb(title) {
     Log.api('Wikipedia', url, r.status, Date.now() - t0, { title });
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
-    const thumbUrl = d.thumbnail?.source ?? null;
-    State.thumbnailCache[title] = thumbUrl;
-    return thumbUrl;
+    const result = {
+      thumb: d.thumbnail?.source ?? null,
+      extract: d.extract ?? null,
+    };
+    _wikiCache[title] = result;
+    State.thumbnailCache[title] = result.thumb;
+    return result;
   } catch (e) {
     Log.warn('api', `Wikipedia failed: ${title}`, e.message);
+    _wikiCache[title] = null;
     State.thumbnailCache[title] = null;
     return null;
   }
+}
+
+async function enrichPoi(poi) {
+  if (!poi || poi.enriched) return;
+  // Wikipedia enrichment
+  if (poi.wikipediaTitle) {
+    const wiki = await fetchWikiSummary(poi.wikipediaTitle);
+    if (wiki?.extract) poi.wikiExtract = wiki.extract;
+  } else {
+    // Try searching by POI name
+    try {
+      const searchUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(poi.name)}`;
+      const r = await fetch(searchUrl);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.extract && d.title) {
+          poi.wikiExtract = d.extract;
+          poi.wikipediaTitle = d.title;
+          if (d.thumbnail?.source) State.thumbnailCache[d.title] = d.thumbnail.source;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  poi.enriched = true;
 }
 
 // ─── Weather API ───────────────────────────────────────────────
@@ -2370,16 +2408,16 @@ function buildPoiCardHtml(poiId, idx) {
       </div>
       <div class="poi-ratings">${poi.myRating ? `<span class="poi-stars poi-my-rating" title="My rating: ${poi.myRating}/5">${'★'.repeat(poi.myRating)}${'☆'.repeat(5-poi.myRating)}</span>` : poi.rating ? `<span class="poi-stars" title="Rating: ${poi.rating}/5">${'★'.repeat(Math.round(poi.rating))}${'☆'.repeat(5-Math.round(poi.rating))}</span>` : ''}<span class="poi-kids">${getKidsHtml(poi.kidsRating)}</span></div>
     </div>
+    <button class="poi-overflow-btn" onclick="event.stopPropagation(); this.closest('.poi-card').classList.toggle('expanded')">···</button>
     <div class="poi-actions">
       <button class="btn-icon btn-edit" onclick="App.openPoiEditModal('${esc(poiId)}')" title="Edit">✏️</button>
-      <button class="btn-icon btn-detail" onclick="App.openDetail('${esc(poiId)}')" title="Details">ℹ</button>
       <select class="btn-move-day" onchange="App.movePoiToDay('${poiId}', this.value); this.selectedIndex=0;" title="Move to another day">
         <option value="">↷</option>
         ${State.trip.days.map((d, i) => i === State.selectedDayIndex ? '' :
           `<option value="${d.date}">${formatShortDate(d.date)}</option>`
         ).join('')}
       </select>
-      ${isBooked ? '' : `<button class="btn-icon btn-shortlist-demote" onclick="App.addToShortlist('${esc(poiId)}')" title="Move to shortlist">📌</button><button class="btn-icon btn-remove" onclick="App.removePoi('${esc(poiId)}')" title="Remove">✕</button>`}
+      ${isBooked ? '' : `<button class="btn-icon btn-shortlist-demote" onclick="App.addToShortlist('${esc(poiId)}')" title="Move to watchlist">📌</button><button class="btn-icon btn-remove" onclick="App.removePoi('${esc(poiId)}')" title="Remove">✕</button>`}
     </div>
   </div>`;
 }
@@ -2755,7 +2793,7 @@ async function openDetail(poiId) {
         </div>
       </div>
       <div class="detail-section-title">Description</div>
-      <div class="detail-desc">${esc(poi.description || '')}</div>
+      <div class="detail-desc" id="det-desc">${esc(poi.description || '')}</div>
       <div class="detail-section-title">Opening Hours</div>
       <div class="detail-hours">🕐 ${esc(poi.openingHours || 'Check locally')}</div>
       ${notesHtml}
@@ -2765,6 +2803,9 @@ async function openDetail(poiId) {
       <a href="${esc(poi.gmapsUrl || '#')}" target="_blank" rel="noopener" style="display:block;">
         <button class="btn-primary maps">🗺 Open in Google Maps</button>
       </a>
+      ${poi.confirmedBooking ? `<a href="${buildCalendarUrl(poi, currentDay?.date || '')}" target="_blank" rel="noopener" style="display:block;">
+        <button class="btn-primary calendar" style="background:#1a73e8;">📅 Add to Calendar</button>
+      </a>` : ''}
     </div>`;
 
   panel.classList.add('open');
@@ -2774,6 +2815,16 @@ async function openDetail(poiId) {
     const url = await fetchThumb(poi.wikipediaTitle);
     const heroEl = document.getElementById('det-hero');
     if (url && heroEl) heroEl.innerHTML = `<img src="${url}" alt="${esc(poi.name)}">`;
+  }
+
+  // Async enrichment — update description with Wikipedia extract
+  if (!poi.enriched) {
+    await enrichPoi(poi);
+    const descEl = document.getElementById('det-desc');
+    if (descEl && poi.wikiExtract && State.detailPoiId === poiId) {
+      descEl.innerHTML = `<div style="font-size:12px;color:var(--color-text);line-height:1.5;">${esc(poi.wikiExtract)}</div>
+        <div style="font-size:10px;color:var(--color-text-secondary);margin-top:4px;">via Wikipedia</div>`;
+    }
   }
 }
 
@@ -4039,17 +4090,10 @@ async function resolveGoogleMapsLink(url) {
   // Data param: !3d=LAT!4d=LNG
   const dataMatch = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
   if (dataMatch) return { name: 'Google Maps Pin', lat: parseFloat(dataMatch[1]), lng: parseFloat(dataMatch[2]) };
-  // Short link: https://maps.app.goo.gl/XXXXX — resolve via redirect
+  // Short link: can't resolve goo.gl via fetch due to CORS
+  // Return a special marker so the UI can show instructions
   if (url.includes('goo.gl/') || url.includes('maps.app.goo.gl/')) {
-    try {
-      const t0 = Date.now();
-      const r = await fetch(url, { redirect: 'follow' });
-      Log.api('Google Maps resolve', url, r.status, Date.now() - t0);
-      const resolved = r.url || '';
-      if (resolved) return resolveGoogleMapsLink(resolved);
-    } catch (e) {
-      Log.warn('api', 'Failed to resolve Google Maps short link', e.message);
-    }
+    return { shortLink: true, url };
   }
   return null;
 }
@@ -4066,7 +4110,27 @@ function searchPois(inputEl, dayIndex) {
   if (q.match(/^https?:\/\/(www\.)?(google\.\w+\/maps|maps\.google|maps\.app\.goo\.gl|goo\.gl)/i)) {
     resultsEl.innerHTML = '<div class="discover-loading">🔗 Resolving link…</div>';
     resolveGoogleMapsLink(q).then(result => {
-      if (!result || !result.lat || !result.lng) {
+      if (!result) {
+        resultsEl.innerHTML = '<div class="discover-empty">Could not extract location from link</div>';
+        return;
+      }
+      // Short link — can't resolve via CORS, show instructions
+      if (result.shortLink) {
+        resultsEl.innerHTML = `
+          <div style="padding:10px;border:1px solid var(--color-border);border-radius:6px;margin:4px 0;">
+            <div style="font-weight:600;font-size:12px;margin-bottom:4px;">📋 Short link detected</div>
+            <div style="font-size:11px;color:var(--color-text-secondary);line-height:1.5;">
+              Google short links can't be resolved directly.<br>
+              <strong>To fix:</strong> Open the link in your browser, then copy the full URL from the address bar and paste it here.
+            </div>
+            <a href="${esc(result.url)}" target="_blank" rel="noopener"
+              style="display:inline-block;margin-top:6px;font-size:11px;color:var(--color-accent);">
+              Open link in browser →
+            </a>
+          </div>`;
+        return;
+      }
+      if (!result.lat || !result.lng) {
         resultsEl.innerHTML = '<div class="discover-empty">Could not extract location from link</div>';
         return;
       }
@@ -4619,6 +4683,51 @@ function addEventAsPoi(id, eventIdx, dayIndex) {
   renderDayPlanContent(dayIndex);
   drawRoute(dayIndex);
   showToast(`Added "${event.title}"`);
+}
+
+// ─── Google Calendar URL ─────────────────────────────────────────
+
+function buildCalendarUrl(poi, dayDate) {
+  if (!dayDate) return '#';
+  const dateStr = dayDate.replace(/-/g, '');
+  const startTime = poi.bookingTime ? poi.bookingTime.replace(':', '') + '00' : '100000';
+  const durH = Math.floor(poi.duration || 1);
+  const durM = Math.round(((poi.duration || 1) - durH) * 60);
+  const startH = parseInt(startTime.slice(0, 2), 10);
+  const startM = parseInt(startTime.slice(2, 4), 10);
+  const endTotalM = startH * 60 + startM + durH * 60 + durM;
+  const endH = Math.floor(endTotalM / 60);
+  const endM = endTotalM % 60;
+  const endTime = `${String(endH).padStart(2, '0')}${String(endM).padStart(2, '0')}00`;
+
+  const details = [poi.description, poi.bookingRef ? `Ref: ${poi.bookingRef}` : '', poi.gmapsUrl].filter(Boolean).join('\n');
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: poi.name,
+    dates: `${dateStr}T${startTime}/${dateStr}T${endTime}`,
+    details,
+    location: `${poi.lat},${poi.lng}`,
+  });
+  return `https://calendar.google.com/calendar/render?${params}`;
+}
+
+// ─── Theme Toggle ───────────────────────────────────────────────
+
+const THEME_CYCLE = { auto: 'dark', dark: 'light', light: 'auto' };
+const THEME_ICONS = { auto: '🌗', dark: '🌙', light: '☀️' };
+
+function toggleTheme() {
+  State.settings.theme = THEME_CYCLE[State.settings.theme || 'auto'];
+  applyTheme();
+  Storage.saveSettings();
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = THEME_ICONS[State.settings.theme || 'auto'];
+}
+
+function applyTheme() {
+  const t = State.settings.theme || 'auto';
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
 }
 
 // ─── Emoji Picker Helper ────────────────────────────────────────
@@ -5466,6 +5575,7 @@ async function loadTrip(tripId) {
   if (savedSettings) Object.assign(State.settings, savedSettings);
   // Ensure dataSource has a valid value
   if (!State.settings.dataSource) State.settings.dataSource = 'osm';
+  applyTheme();
 
   // Load API quota
   await loadApiQuota();
@@ -6156,6 +6266,15 @@ function injectHeaderButtons() {
   btnOverview.onclick = () => App.openTripOverviewModal();
   btnOverview.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
 
+  const btnTheme = document.createElement('button');
+  btnTheme.id = 'btn-theme';
+  btnTheme.title = 'Toggle theme (auto / dark / light)';
+  btnTheme.setAttribute('aria-label', 'Toggle theme');
+  btnTheme.textContent = THEME_ICONS[State.settings.theme || 'auto'];
+  btnTheme.onclick = () => toggleTheme();
+  btnTheme.style.cssText = 'background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.85);padding:5px 10px;border-radius:6px;font-size:14px;cursor:pointer;white-space:nowrap;';
+
+  header.appendChild(btnTheme);
   header.appendChild(btnPin);
   header.appendChild(btnImport);
   header.appendChild(btnShare);
@@ -6246,6 +6365,7 @@ window.App = {
   loadSharedPlan,
   dismissSharedPlan,
   importPlanFile,
+  toggleTheme,
   resetApiQuota,
   startRouteReplay,
   stopRouteReplay,

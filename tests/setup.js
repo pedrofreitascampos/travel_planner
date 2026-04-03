@@ -322,6 +322,9 @@ function createTestContext() {
     window.copyDayPois = copyDayPois;
     window.resolveGoogleMapsLink = resolveGoogleMapsLink;
     window.addFromGoogleLink = addFromGoogleLink;
+    window.buildCalendarUrl = buildCalendarUrl;
+    window.THEME_CYCLE = THEME_CYCLE;
+    window.enrichPoi = enrichPoi;
     window.addToShortlist = addToShortlist;
     window.reorderPlan = reorderPlan;
     window.promoteFromShortlist = promoteFromShortlist;
