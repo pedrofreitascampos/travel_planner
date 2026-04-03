@@ -371,6 +371,26 @@ test('calcTripMetrics: total cost is sum of all day costs', () => {
   );
 });
 
+// ─── Trip badges ─────────────────────────────────────────────
+
+test('calcTripMetrics: badges is an array', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  const tripMetrics = ctx.calcTripMetrics();
+  assert.ok(Array.isArray(tripMetrics.badges), 'badges should be an array');
+});
+
+test('calcTripMetrics: badges have icon, label, color', () => {
+  const ctx = createTestContext();
+  installMockTrip(ctx);
+  const tripMetrics = ctx.calcTripMetrics();
+  tripMetrics.badges.forEach(b => {
+    assert.ok(b.icon, 'badge should have icon');
+    assert.ok(b.label, 'badge should have label');
+    assert.ok(b.color, 'badge should have color');
+  });
+});
+
 // ─── Logistical friction: book-ahead POIs increase friction ─────
 
 test('calcDayMetrics: book-ahead POIs increase logistical friction', () => {

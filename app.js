@@ -1021,6 +1021,22 @@ function calcTripMetrics() {
     if (m && m.overall < (allMetrics[worstDayIdx]?.overall || 10)) worstDayIdx = i;
   });
 
+  // Generate trip badges
+  const badges = [];
+  if (avgKidsFun >= 7) badges.push({ icon: '🧒', label: 'Great Kids Trip', color: '#27ae60' });
+  else if (avgKidsFun >= 5) badges.push({ icon: '🧒', label: 'Kid-Friendly', color: '#2980b9' });
+  if (avgCultural >= 7) badges.push({ icon: '🏛️', label: 'Culture Rich', color: '#7c4dff' });
+  if (avgGastronomic >= 7) badges.push({ icon: '🍽️', label: 'Foodie Trip', color: '#ef6c00' });
+  if (avgRelaxation >= 7) badges.push({ icon: '🏖️', label: 'Relaxing Getaway', color: '#00897b' });
+  if (avgFun >= 7) badges.push({ icon: '🎉', label: 'Fun-Packed', color: '#d81b60' });
+  if (avgLogisticalFriction < 3) badges.push({ icon: '✨', label: 'Smooth & Efficient', color: '#1565c0' });
+  if (avgTirednessNorm < 4) badges.push({ icon: '😌', label: 'Easy-Going', color: '#66bb6a' });
+  else if (avgTirednessNorm > 7) badges.push({ icon: '🥵', label: 'Intense Adventure', color: '#e53935' });
+  if (overallTrip >= 7) badges.push({ icon: '🏆', label: 'Excellent Trip', color: '#f0c040' });
+  if (totalCost / dayCount < 100) badges.push({ icon: '💰', label: 'Budget-Friendly', color: '#388e3c' });
+  const greatDays = allMetrics.filter(m => m && m.overall >= 7).length;
+  if (greatDays >= dayCount * 0.6) badges.push({ icon: '⭐', label: 'Consistently Great', color: '#ff8f00' });
+
   return {
     allMetrics,
     totalCost, totalEntries, totalMeals, totalTransport, totalAcc,
@@ -1034,6 +1050,7 @@ function calcTripMetrics() {
     avgKidsFun,
     overallTrip,
     suggestions,
+    badges,
     bestDayIdx,
     worstDayIdx,
   };
@@ -2073,9 +2090,10 @@ function renderDayTabs() {
     const poiCount = plan.length;
     const metrics = poiCount > 0 ? calcDayMetrics(i, null) : null;
     const score = metrics ? metrics.overall : 0;
-    const glowColor = score >= 7 ? '#27ae60' : score >= 5 ? '#2980b9' : score >= 3 ? '#f39c12' : 'transparent';
-    const glowStyle = score >= 3 ? `box-shadow: 0 0 8px 2px ${glowColor}40;` : '';
-    return `<div class="day-tab${active ? ' active' : ''}" data-idx="${i}" onclick="App.selectDay(${i})"
+    const glowColor = score >= 7 ? '#f0c040' : score >= 5.5 ? '#c0c0c0' : score >= 3 ? '#f39c12' : 'transparent';
+    const haloClass = score >= 7 ? ' tab-halo-gold' : score >= 5.5 ? ' tab-halo-silver' : '';
+    const glowStyle = score >= 5.5 ? `box-shadow: 0 0 10px 3px ${glowColor}50;` : score >= 3 ? `box-shadow: 0 0 6px 1px ${glowColor}30;` : '';
+    return `<div class="day-tab${active ? ' active' : ''}${haloClass}" data-idx="${i}" onclick="App.selectDay(${i})"
         style="${active ? `background:${color};` : ''}${glowStyle}">
       <div class="tab-emoji">${State.dayEmojis?.[day.date] || day.emoji}</div>
       <div class="tab-weather"></div>
@@ -3368,7 +3386,17 @@ function updateTripOverviewContent() {
   // ── Packing Weather Summary ──
   const packingHtml = renderPackingWeatherSummary();
 
+  const badgesHtml = tripMetrics.badges.length > 0
+    ? `<div class="metric-section">
+        <div class="metric-section-title">🏅 Trip Badges</div>
+        <div class="trip-badges">${tripMetrics.badges.map(b =>
+          `<span class="trip-badge" style="background:${b.color}18;color:${b.color};border:1px solid ${b.color}40;">${b.icon} ${b.label}</span>`
+        ).join('')}</div>
+      </div>`
+    : '';
+
   content.innerHTML = `
+    ${badgesHtml}
     <div class="metric-section">
       <div class="metric-section-title">🌈 Trip Timeline</div>
       <div class="trip-timeline">${timelineHtml}</div>

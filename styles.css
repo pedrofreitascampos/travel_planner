@@ -2156,6 +2156,24 @@ body.modal-open #map {
 }
 
 /* ─── Trip Overview Modal Content ─────────────────────────────── */
+/* ─── Trip Badges ────────────────────────────────────────────── */
+.trip-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+.trip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .trip-budget-total {
   font-size: 28px;
   font-weight: 700;
@@ -2315,6 +2333,16 @@ body.modal-open #map {
   width: 6px; height: 6px; border-radius: 50%;
   margin-top: 2px;
 }
+.tab-halo-gold {
+  border: 1.5px solid #f0c040;
+  background: linear-gradient(135deg, rgba(240,192,64,0.12), transparent) !important;
+}
+.tab-halo-gold .tab-score-dot { background: #f0c040 !important; }
+.tab-halo-silver {
+  border: 1.5px solid #c0c0c0;
+  background: linear-gradient(135deg, rgba(192,192,192,0.10), transparent) !important;
+}
+.tab-halo-silver .tab-score-dot { background: #c0c0c0 !important; }
 
 /* ─── Golden Hour Row ─────────────────────────────────────────── */
 .golden-hour-row {
