@@ -1699,9 +1699,13 @@ async function drawRoute(dayIndex) {
       const dayMode = getEffectiveRouteMode(day.date);
 
       // Build per-leg routes: each leg = [fromPoint, toPoint, mode]
-      // Mode is determined by the destination POI's transport setting
+      // Mode: use explicit POI transport setting, or auto-detect by distance
       const allPoints = [...poiWaypoints];
-      const poiModes = poiIds.map(p => getPoiTransportMode(p.id));
+      const startCoords = arrCoords?.lat && arrCoords?.lng ? [arrCoords.lat, arrCoords.lng] : poiWaypoints[0];
+      const poiModes = poiIds.map((p, i) => {
+        const from = i === 0 ? startCoords : poiWaypoints[i - 1];
+        return getEffectiveLegMode(from, poiWaypoints[i], p.id);
+      });
 
       // Optionally add acc as start/end for driving legs
       if (arrCoords?.lat && arrCoords?.lng) {
@@ -2376,6 +2380,7 @@ function buildPoiCardHtml(poiId, idx) {
   if (poi.bookAhead && !isBooked) badges.push('<span class="badge badge-warning">⚠️ Book ahead</span>');
 
   const tMode = getPoiTransportMode(poiId);
+  const tExplicit = !!State.poiTransport[poiId];
   const tIcon = tMode === 'driving' ? '🚗' : '🚶';
   const tTitle = tMode === 'driving' ? 'Drive here (click to switch to walk)' : 'Walk here (click to switch to drive)';
 
@@ -3607,6 +3612,20 @@ function togglePoiTransport(poiId) {
 
 function getPoiTransportMode(poiId) {
   return State.poiTransport[poiId] || 'foot';
+}
+
+// Determine the effective mode for routing between two points.
+// If both POIs have explicit transport set, use destination's mode.
+// Used by the route summary UI to show the right icon.
+function getEffectiveLegMode(fromCoords, toCoords, destPoiId) {
+  const explicit = State.poiTransport[destPoiId];
+  if (explicit) return explicit;
+  // Auto-detect: if points are >3km apart, suggest driving
+  if (fromCoords && toCoords) {
+    const dist = haversineKm(fromCoords[0], fromCoords[1], toCoords[0], toCoords[1]);
+    if (dist > 3) return 'driving';
+  }
+  return 'foot';
 }
 
 // ─── Day Accommodation & Transport ─────────────────────────────
