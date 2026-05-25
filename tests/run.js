@@ -16,6 +16,7 @@ const testFiles = [
   './test-ui-logic.js',
   './test-oikumene-export.js',
   './test-gmaps-export.js',
+  './test-touch-drag.js',
 ];
 
 let totalPass = 0;

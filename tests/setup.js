@@ -334,6 +334,7 @@ function createTestContext() {
     window.getWatchlistPriority = getWatchlistPriority;
     window.getEffectiveLegMode = getEffectiveLegMode;
     window.buildDayGoogleMapsUrl = buildDayGoogleMapsUrl;
+    window.initTouchDrag = initTouchDrag;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });

@@ -2560,6 +2560,9 @@ function initDragDrop(listEl) {
 
 // ─── Touch Drag (Mobile) ───────────────────────────────────────
 // Uses event delegation — single set of listeners per list element.
+// The non-passive touchmove handler is attached to `document` only while
+// a drag is active. Keeping it off `listEl` by default avoids forcing the
+// browser into the slow scroll path for every touch in the list.
 function initTouchDrag(listEl) {
   if (!listEl || listEl._touchDragBound) return;
   listEl._touchDragBound = true;
@@ -2568,8 +2571,31 @@ function initTouchDrag(listEl) {
   let ghost = null;
   let origCard = null;
   let lastY = 0;
-
   let srcSection = null;
+
+  const onDragMove = e => {
+    if (!ghost) return;
+    e.preventDefault();
+    const dy = e.touches[0].clientY - lastY;
+    lastY = e.touches[0].clientY;
+    const top = parseFloat(ghost.style.top) + dy;
+    ghost.style.top = top + 'px';
+
+    ghost.style.visibility = 'hidden';
+    const underEl = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+    ghost.style.visibility = '';
+    const panel = listEl.closest('.day-tab-panel') || listEl.closest('.plan-content-host');
+    if (panel) panel.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    else listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    const tgtCard = underEl?.closest('[data-poi-id]');
+    if (tgtCard && tgtCard !== origCard) tgtCard.classList.add('drag-over');
+  };
+
+  const endDrag = () => {
+    document.removeEventListener('touchmove', onDragMove);
+    if (ghost) { ghost.remove(); ghost = null; }
+    if (origCard) origCard.style.opacity = '';
+  };
 
   listEl.addEventListener('touchstart', e => {
     const handle = e.target.closest('.drag-handle');
@@ -2588,34 +2614,15 @@ function initTouchDrag(listEl) {
       z-index:9999;opacity:0.9;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,0.25);
       border-radius:10px;background:white;`;
     document.body.appendChild(ghost);
+
+    document.addEventListener('touchmove', onDragMove, { passive: false });
   }, { passive: true });
 
-  listEl.addEventListener('touchmove', e => {
-    if (!ghost) return;
-    e.preventDefault();
-    const dy = e.touches[0].clientY - lastY;
-    lastY = e.touches[0].clientY;
-    const top = parseFloat(ghost.style.top) + dy;
-    ghost.style.top = top + 'px';
-
-    // Find card under finger
-    ghost.style.visibility = 'hidden';
-    const underEl = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-    ghost.style.visibility = '';
-    // Clear drag-over from all containers (tour + shortlist)
-    const panel = listEl.closest('.day-tab-panel') || listEl.closest('.plan-content-host');
-    if (panel) panel.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-    else listEl.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-    const tgtCard = underEl?.closest('[data-poi-id]');
-    if (tgtCard && tgtCard !== origCard) tgtCard.classList.add('drag-over');
-  }, { passive: false });
-
   listEl.addEventListener('touchend', e => {
-    if (!ghost) return;
-    ghost.remove();
-    if (origCard) origCard.style.opacity = '';
+    const wasDragging = !!ghost;
+    endDrag();
+    if (!wasDragging) { srcId = null; origCard = null; srcSection = null; return; }
 
-    ghost = null;
     const touch = e.changedTouches[0];
     const underEl = document.elementFromPoint(touch.clientX, touch.clientY);
     const panel = listEl.closest('.day-tab-panel') || listEl.closest('.plan-content-host');
@@ -2635,7 +2642,14 @@ function initTouchDrag(listEl) {
       }
     }
     srcId = null; origCard = null; srcSection = null;
-  });
+  }, { passive: true });
+
+  // touchcancel can fire if the OS interrupts the gesture (incoming call, etc.);
+  // we must still release the non-passive listener.
+  listEl.addEventListener('touchcancel', () => {
+    endDrag();
+    srcId = null; origCard = null; srcSection = null;
+  }, { passive: true });
 }
 
 function reorderPlan(dayIndex, srcId, tgtId) {

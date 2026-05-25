@@ -2632,6 +2632,8 @@ body.modal-open #map {
   #sheet-handle { min-height: 44px; display: flex; align-items: center; justify-content: center; }
 
   /* ─── Compact mobile POI cards ─────────────────────────── */
+  /* Let vertical scrolling win over HTML5 drag-and-drop evaluation on iOS Safari. */
+  .poi-card, .watchlist-card { touch-action: pan-y; }
   .poi-card { padding: 3px 4px; }
   .poi-card .poi-thumb { display: none; }
   .poi-card .poi-ratings { display: none; }
