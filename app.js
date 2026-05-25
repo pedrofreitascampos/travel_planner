@@ -2211,8 +2211,9 @@ function renderDayPlanContent(dayIndex) {
   // Watchlist for this day (always visible)
   const watchlistIds = State.shortlist[day.date] || [];
   const daySelectOpts = State.trip.days.map((d, i) => i === dayIndex ? '' : `<option value="${d.date}">${formatShortDate(d.date)}</option>`).join('');
-  const tourCopyHtml = plan.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;margin-left:auto;" onchange="App.copyDayPois(${dayIndex}, this.value, 'tour'); this.selectedIndex=0;" title="Copy tour to another day">
+  const tourCopyHtml = plan.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;" onchange="App.copyDayPois(${dayIndex}, this.value, 'tour'); this.selectedIndex=0;" title="Copy tour to another day">
     <option value="">📋 Copy →</option>${daySelectOpts}</select>` : '';
+  const gmapsBtnHtml = plan.length > 0 ? `<button class="btn-day-gmaps" onclick="App.openDayInGoogleMaps(${dayIndex})" title="Open this day's route in Google Maps">🗺️ Maps</button>` : '';
   const watchlistCopyHtml = watchlistIds.length > 0 ? `<select class="btn-move-day" style="width:auto;height:auto;padding:3px 6px;font-size:10px;margin-left:auto;" onchange="App.copyDayPois(${dayIndex}, this.value, 'watchlist'); this.selectedIndex=0;" title="Copy watchlist to another day">
     <option value="">📋 Copy →</option>${daySelectOpts}</select>` : '';
 
@@ -2256,6 +2257,7 @@ function renderDayPlanContent(dayIndex) {
       <div class="tour-section">
         <div class="section-header">
           🗺 Tour ${plan.length > 0 ? `<span class="section-count">${plan.length}</span>` : ''}
+          ${gmapsBtnHtml}
           ${tourCopyHtml}
         </div>
         ${departCardHtml}
@@ -3690,6 +3692,68 @@ function getEffectiveLegMode(fromCoords, toCoords, destPoiId) {
     if (dist > 3) return 'driving';
   }
   return 'foot';
+}
+
+// Build a Google Maps directions URL for a day's planned route.
+// Returns null if no meaningful route can be built (no POIs and no inter-city movement).
+function buildDayGoogleMapsUrl(dayIndex) {
+  const day = getDay(dayIndex);
+  if (!day) return null;
+  const plan = State.plan[day.date] || [];
+  const pois = plan.map(id => getPoi(id)).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+
+  const prevDate = State.trip.days[dayIndex - 1]?.date;
+  const depAcc = prevDate ? getEffectiveAcc(prevDate) : getHomeAcc();
+  const arrAcc = getEffectiveAcc(day.date);
+  const depCoords = depAcc ? getAccCoords(depAcc) : null;
+  const arrCoords = arrAcc ? getAccCoords(arrAcc) : null;
+  const hasDep = depCoords && Number.isFinite(depCoords.lat) && Number.isFinite(depCoords.lng);
+  const hasArr = arrCoords && Number.isFinite(arrCoords.lat) && Number.isFinite(arrCoords.lng);
+  // Treat home-acc as not-inter-city: the trip-start "travel" leg is typically a flight,
+  // not something Google Maps should route by road.
+  const isInterCity = depAcc && arrAcc && depAcc.id !== arrAcc.id && !depAcc.isHome;
+
+  // Build the ordered sequence of stops.
+  const stops = [];
+  if (isInterCity && hasDep) stops.push([depCoords.lat, depCoords.lng]);
+  else if (hasArr) stops.push([arrCoords.lat, arrCoords.lng]);
+  else if (hasDep) stops.push([depCoords.lat, depCoords.lng]);
+  pois.forEach(p => stops.push([p.lat, p.lng]));
+  if (hasArr) stops.push([arrCoords.lat, arrCoords.lng]);
+
+  if (stops.length < 2) return null;
+  // Degenerate: origin == destination and no POIs in between → no route.
+  if (pois.length === 0 && stops.length === 2 && stops[0][0] === stops[1][0] && stops[0][1] === stops[1][1]) {
+    return null;
+  }
+
+  // Majority transport mode → Google Maps travelmode.
+  let footCount = 0, drivingCount = 0;
+  for (let i = 0; i < pois.length; i++) {
+    const from = i === 0 ? stops[0] : [pois[i - 1].lat, pois[i - 1].lng];
+    const mode = getEffectiveLegMode(from, [pois[i].lat, pois[i].lng], pois[i].id);
+    if (mode === 'driving') drivingCount++; else footCount++;
+  }
+  // Inter-city leg always counts as driving for the day total.
+  if (isInterCity) drivingCount++;
+  const travelmode = footCount > drivingCount ? 'walking' : 'driving';
+
+  const origin = `${stops[0][0]},${stops[0][1]}`;
+  const destination = `${stops[stops.length - 1][0]},${stops[stops.length - 1][1]}`;
+  const middle = stops.slice(1, -1);
+  const params = new URLSearchParams({ api: '1', origin, destination, travelmode });
+  if (middle.length) params.set('waypoints', middle.map(([la, ln]) => `${la},${ln}`).join('|'));
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function openDayInGoogleMaps(dayIndex) {
+  const url = buildDayGoogleMapsUrl(dayIndex);
+  if (!url) {
+    showToast('Add at least one POI or a different arrival hotel to build a route');
+    return;
+  }
+  Log.action('Open day in Google Maps', { dayIndex, urlLength: url.length });
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 // ─── Day Accommodation & Transport ─────────────────────────────
@@ -5764,8 +5828,9 @@ function injectModals() {
         <div class="settings-divider">Discovery</div>
         <div class="settings-row-2">
           <div class="settings-field">
-            <label class="settings-label">Nearby radius (km)</label>
+            <label class="settings-label">Search radius (km)</label>
             <input type="number" id="settings-radius" class="settings-input" min="1" max="50" step="1" placeholder="5">
+            <div class="settings-hint">Used for nearby places and cultural events</div>
           </div>
           <div class="settings-field">
             <label class="settings-label">Along route (km)</label>
@@ -6420,6 +6485,7 @@ window.App = {
   addNewAccommodation,
   setDayRouteMode,
   togglePoiTransport,
+  openDayInGoogleMaps,
   setTransportType,
   setTransportCost,
   openAccEditModal,

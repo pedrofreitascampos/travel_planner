@@ -333,6 +333,7 @@ function createTestContext() {
     window.cycleWatchlistPriority = cycleWatchlistPriority;
     window.getWatchlistPriority = getWatchlistPriority;
     window.getEffectiveLegMode = getEffectiveLegMode;
+    window.buildDayGoogleMapsUrl = buildDayGoogleMapsUrl;
   `;
 
   vm.runInContext(patchedCode, ctx, { filename: 'app.js' });
