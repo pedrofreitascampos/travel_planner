@@ -5711,6 +5711,25 @@ async function loadTrip(tripId) {
     State.watchlistPriority = {};
   }
 
+  // Apply trip-level default transport (e.g. flight days) for any date not yet overridden
+  if (trip.defaultDayTransport) {
+    Object.entries(trip.defaultDayTransport).forEach(([d, t]) => {
+      if (!State.dayTransport[d]) State.dayTransport[d] = { ...t };
+    });
+  }
+  // Apply trip-level default shortlist (watchlist) for any date not yet populated
+  if (trip.defaultShortlist) {
+    Object.entries(trip.defaultShortlist).forEach(([d, ids]) => {
+      if (!State.shortlist[d] || State.shortlist[d].length === 0) State.shortlist[d] = [...ids];
+    });
+  }
+  // Apply trip-level default watchlist priorities
+  if (trip.defaultWatchlistPriority) {
+    Object.entries(trip.defaultWatchlistPriority).forEach(([id, p]) => {
+      if (State.watchlistPriority[id] == null) State.watchlistPriority[id] = p;
+    });
+  }
+
   // Load party config and settings
   const savedParty = await Storage.loadParty();
   if (savedParty && Array.isArray(savedParty)) State.partyConfig = savedParty;
